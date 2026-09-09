@@ -1,14 +1,24 @@
 import './style.css'
 import {
   CATEGORIES,
+  FAULT_STATUS_LABELS,
+  MACHINES,
+  OKUMA_MACHINES,
   STATUS_LABELS,
-  VODJA_NAME,
   WORKSTATIONS,
   findSlot,
   findWorkstation,
 } from './data.ts'
+import { createUser, findUserByName, verifyPin } from './auth.ts'
 import { fileToDataUrl } from './image.ts'
 import {
+  decodeQrFromFile,
+  decodeQrFromVideo,
+  startCamera,
+  stopCamera,
+} from './qr.ts'
+import {
+  escapeHtml,
   formatDate,
   formatDateTime,
   loadData,
@@ -20,20 +30,30 @@ import {
 import type {
   AppData,
   Category,
+  FaultStatus,
+  MainTab,
+  MachineFault,
+  OkumaService,
   ProcurementRequest,
   RequestStatus,
   Session,
+  StockItem,
+  SupplierRecord,
   Task,
 } from './types.ts'
 
-type Tab = 'zahteve' | 'nova' | 'zgodovina' | 'opravila'
+type NabavaSub = 'seznam' | 'nova' | 'opravila' | 'moje'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 let data: AppData = loadData()
 let session: Session | null = loadSession()
-let tab: Tab = 'zahteve'
+let tab: MainTab = 'nabava'
+let nabavaSub: NabavaSub = 'seznam'
 let statusFilter: RequestStatus | 'vse' = 'odprto'
+let faultFilter: FaultStatus | 'vse' = 'novo'
 let toastTimer: number | undefined
+let cameraStream: MediaStream | null = null
+let scanLoop = 0
 
 function persist() {
   saveData(data)
@@ -50,43 +70,106 @@ function showToast(msg: string) {
   toastTimer = window.setTimeout(() => el.remove(), 2600)
 }
 
+function stopScan() {
+  window.cancelAnimationFrame(scanLoop)
+  stopCamera(cameraStream)
+  cameraStream = null
+}
+
 function logout() {
+  stopScan()
   session = null
   saveSession(null)
-  tab = 'zahteve'
+  tab = 'nabava'
+  nabavaSub = 'seznam'
   render()
 }
 
 function setSession(s: Session) {
   session = s
   saveSession(s)
-  tab = s.role === 'delavec' ? 'nova' : 'zahteve'
+  data.lastUserId = s.userId
+  persist()
+  tab = 'nabava'
+  nabavaSub = s.role === 'delavec' ? 'nova' : 'seznam'
   statusFilter = s.role === 'vodja' ? 'odprto' : 'vse'
   render()
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
+function isVodja() {
+  return session?.role === 'vodja'
+}
+
+function rememberSupplier(name: string, category?: string, itemHint?: string) {
+  const n = name.trim()
+  if (!n) return
+  const existing = data.suppliers.find((s) => s.name.toLowerCase() === n.toLowerCase())
+  if (existing) {
+    existing.lastUsed = new Date().toISOString()
+    existing.count += 1
+    if (category) existing.category = category
+    if (itemHint) existing.itemHint = itemHint
+  } else {
+    data.suppliers.push({
+      name: n,
+      category,
+      itemHint,
+      lastUsed: new Date().toISOString(),
+      count: 1,
+    })
+  }
+}
+
+function suggestSuppliers(category?: string, title?: string): SupplierRecord[] {
+  const t = (title || '').toLowerCase()
+  const c = (category || '').toLowerCase()
+  return [...data.suppliers]
+    .sort((a, b) => {
+      const score = (s: SupplierRecord) => {
+        let sc = s.count
+        if (c && s.category?.toLowerCase() === c) sc += 50
+        if (t && s.itemHint && t.includes(s.itemHint.toLowerCase())) sc += 30
+        if (t && s.name.toLowerCase().includes(t)) sc += 10
+        return sc
+      }
+      return score(b) - score(a) || b.lastUsed.localeCompare(a.lastUsed)
+    })
+    .slice(0, 8)
 }
 
 function render() {
+  stopScan()
   if (!session) {
-    renderLogin()
+    renderAuth()
     return
   }
-  if (session.role === 'vodja') renderVodja()
-  else renderDelavec()
+  // Validate session user still exists
+  if (!data.users.find((u) => u.id === session!.userId) && data.users.length > 0) {
+    logout()
+    return
+  }
+  renderApp()
 }
 
-function shell(content: string, tabsHtml: string) {
+function shell(content: string) {
+  const tabs: Array<[MainTab, string]> = [
+    ['nabava', 'Nabava'],
+    ['zaloge', 'Zaloge'],
+    ['okvare', 'Okvare'],
+    ['servisi', 'Servisi'],
+    ['zgodovina', 'Zgodovina'],
+  ]
+  const tabsHtml = tabs
+    .map(
+      ([id, label]) =>
+        `<button class="tab ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">${label}</button>`,
+    )
+    .join('')
+
   app.innerHTML = `
     <header class="app-header">
       <div>
-        <h1>Nabava — Orodjarna</h1>
+        <h1>Orodjarna</h1>
         <div class="sub">${escapeHtml(session!.displayName)}</div>
       </div>
       <div class="row">
@@ -97,77 +180,227 @@ function shell(content: string, tabsHtml: string) {
     <nav class="tabs">${tabsHtml}</nav>
     <main>${content}</main>
   `
-  bindCommon()
-}
-
-function bindCommon() {
   app.querySelector('[data-action="logout"]')?.addEventListener('click', logout)
   app.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      tab = btn.dataset.tab as Tab
+      tab = btn.dataset.tab as MainTab
+      if (tab === 'nabava' && session!.role === 'delavec') nabavaSub = 'nova'
+      if (tab === 'nabava' && session!.role === 'vodja') nabavaSub = 'seznam'
       render()
     })
   })
 }
 
-function tabBtn(id: Tab, label: string) {
-  return `<button class="tab ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">${label}</button>`
-}
+/* ===================== Auth ===================== */
+function renderAuth() {
+  const last = data.lastUserId ? data.users.find((u) => u.id === data.lastUserId) : undefined
+  const userOptions = data.users
+    .map(
+      (u) =>
+        `<option value="${escapeHtml(u.id)}" ${last?.id === u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.role === 'vodja' ? 'vodja' : 'delavec'})</option>`,
+    )
+    .join('')
 
-/* ---------- Login ---------- */
-function renderLogin() {
-  const wsBlocks = WORKSTATIONS.map((ws) => {
-    const slots = ws.slots
-      .map(
-        (slot) => `
-        <button class="choice" type="button" data-login-ws="${ws.id}" data-login-slot="${slot.id}">
-          ${escapeHtml(slot.label)}
-          <small>${escapeHtml(ws.name)}</small>
-        </button>`,
-      )
-      .join('')
-    return `<div class="ws-group"><h3>${escapeHtml(ws.name)}</h3><div class="choice-grid">${slots}</div></div>`
-  }).join('')
+  const wsOpts = WORKSTATIONS.map(
+    (w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`,
+  ).join('')
 
   app.innerHTML = `
     <div class="login-hero">
       <div class="logo">NO</div>
       <h1>Nabava orodjarne</h1>
-      <p class="muted">Notranji prototip — izberi vlogo (brez gesla)</p>
+      <p class="muted">Lokalni računi (PIN) — podatki ostanejo v tem brskalniku. Sinhronizacija med napravami zahteva strežnik (kasneje).</p>
     </div>
+
     <section class="card stack">
-      <h2>Vodja nabave</h2>
-      <button class="choice" type="button" data-login-vodja>
-        ${escapeHtml(VODJA_NAME)}
-        <small>Pregled zahtev, naročila, opravila</small>
-      </button>
+      <h2>Prijava</h2>
+      ${
+        data.users.length === 0
+          ? `<p class="muted">Še ni uporabnikov — najprej se registrirajte.</p>`
+          : `
+        <form class="stack" id="login-form">
+          <label class="field">Uporabnik
+            <select name="userId" required>
+              <option value="">— izberi —</option>
+              ${userOptions}
+            </select>
+          </label>
+          <label class="field">PIN / geslo
+            <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required minlength="4" maxlength="32" />
+          </label>
+          <button class="btn btn-primary btn-block" type="submit">Prijava</button>
+        </form>`
+      }
     </section>
-    <section class="card">
-      <h2>Delavec — delovna postaja</h2>
-      ${wsBlocks}
+
+    <section class="card stack">
+      <h2>Registracija</h2>
+      <form class="stack" id="reg-form">
+        <label class="field">Ime
+          <input name="name" required maxlength="60" placeholder="npr. Janez Novak" />
+        </label>
+        <label class="field">PIN / geslo (min. 4)
+          <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" maxlength="32" />
+        </label>
+        <label class="field">Vloga
+          <select name="role" id="reg-role">
+            <option value="delavec">Delavec</option>
+            <option value="vodja">Vodja</option>
+          </select>
+        </label>
+        <label class="field" id="reg-ws-wrap">Delovna postaja
+          <select name="workstationId">${wsOpts}</select>
+        </label>
+        <button class="btn btn-secondary btn-block" type="submit">Ustvari račun</button>
+      </form>
     </section>
   `
 
-  app.querySelector('[data-login-vodja]')?.addEventListener('click', () => {
-    setSession({ role: 'vodja', displayName: VODJA_NAME })
-  })
-  app.querySelectorAll<HTMLButtonElement>('[data-login-ws]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const workstationId = btn.dataset.loginWs!
-      const slotId = btn.dataset.loginSlot!
-      const ws = findWorkstation(workstationId)!
-      const slot = findSlot(workstationId, slotId)!
-      setSession({
-        role: 'delavec',
-        displayName: `${slot.label} · ${ws.name}`,
-        workstationId,
-        slotId,
-      })
+  const roleSelect = app.querySelector<HTMLSelectElement>('#reg-role')
+  const wsWrap = app.querySelector<HTMLElement>('#reg-ws-wrap')
+  const syncWs = () => {
+    if (wsWrap) wsWrap.style.display = roleSelect?.value === 'vodja' ? 'none' : ''
+  }
+  roleSelect?.addEventListener('change', syncWs)
+  syncWs()
+
+  app.querySelector<HTMLFormElement>('#login-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const fd = new FormData(e.target as HTMLFormElement)
+    const userId = String(fd.get('userId') || '')
+    const pin = String(fd.get('pin') || '')
+    const user = data.users.find((u) => u.id === userId)
+    if (!user) return
+    if (!(await verifyPin(pin, user.pinHash))) {
+      showToast('Napačen PIN')
+      return
+    }
+    const ws = user.workstationId ? findWorkstation(user.workstationId) : undefined
+    const slot = ws?.slots[0]
+    setSession({
+      userId: user.id,
+      role: user.role,
+      displayName: user.name,
+      workstationId: user.workstationId,
+      slotId: slot?.id,
     })
+    showToast(`Pozdravljeni, ${user.name}`)
+  })
+
+  app.querySelector<HTMLFormElement>('#reg-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const fd = new FormData(e.target as HTMLFormElement)
+    const name = String(fd.get('name') || '').trim()
+    const pin = String(fd.get('pin') || '')
+    const role = String(fd.get('role') || 'delavec') as 'vodja' | 'delavec'
+    const workstationId = role === 'delavec' ? String(fd.get('workstationId') || '') : undefined
+    if (findUserByName(data.users, name)) {
+      showToast('Uporabnik s tem imenom že obstaja')
+      return
+    }
+    const user = await createUser({ name, pin, role, workstationId })
+    data.users.push(user)
+    persist()
+    const ws = workstationId ? findWorkstation(workstationId) : undefined
+    setSession({
+      userId: user.id,
+      role: user.role,
+      displayName: user.name,
+      workstationId,
+      slotId: ws?.slots[0]?.id,
+    })
+    showToast('Račun ustvarjen')
   })
 }
 
-/* ---------- Shared request cards ---------- */
+/* ===================== Shared helpers ===================== */
+function qrFieldHtml(id: string, value = '') {
+  return `
+    <label class="field">QR koda (neobvezno)
+      <div class="qr-row">
+        <input type="text" id="${id}" value="${escapeHtml(value)}" placeholder="Vnesi ali skeniraj QR" />
+        <button class="btn btn-secondary" type="button" data-open-scan="${id}">📷</button>
+      </div>
+    </label>
+    <div class="scan-panel hidden" data-scan-panel="${id}">
+      <video class="scan-video" playsinline muted data-scan-video="${id}"></video>
+      <div class="actions">
+        <label class="btn btn-ghost file-btn">Fotografiraj / izberi
+          <input type="file" accept="image/*" capture="environment" hidden data-scan-file="${id}" />
+        </label>
+        <button class="btn btn-ghost" type="button" data-stop-scan="${id}">Zapri kamero</button>
+      </div>
+      <p class="muted small">Če kamera ni na voljo, vnesite QR ročno ali naložite fotografijo.</p>
+    </div>`
+}
+
+function bindQrField(inputId: string) {
+  const input = app.querySelector<HTMLInputElement>(`#${inputId}`)
+  const panel = app.querySelector<HTMLElement>(`[data-scan-panel="${inputId}"]`)
+  const video = app.querySelector<HTMLVideoElement>(`[data-scan-video="${inputId}"]`)
+  const openBtn = app.querySelector(`[data-open-scan="${inputId}"]`)
+  const stopBtn = app.querySelector(`[data-stop-scan="${inputId}"]`)
+  const fileInput = app.querySelector<HTMLInputElement>(`[data-scan-file="${inputId}"]`)
+
+  const onFound = (val: string) => {
+    if (input) input.value = val
+    showToast('QR prebran')
+    stopScan()
+    panel?.classList.add('hidden')
+  }
+
+  openBtn?.addEventListener('click', async () => {
+    stopScan()
+    panel?.classList.remove('hidden')
+    if (!video || !navigator.mediaDevices?.getUserMedia) {
+      showToast('Kamera ni na voljo — uporabite fotografijo ali vnos')
+      return
+    }
+    try {
+      cameraStream = await startCamera(video)
+      const tick = () => {
+        const code = decodeQrFromVideo(video)
+        if (code) {
+          onFound(code)
+          return
+        }
+        scanLoop = requestAnimationFrame(tick)
+      }
+      scanLoop = requestAnimationFrame(tick)
+    } catch {
+      showToast('Dostop do kamere zavrnjen — uporabite fotografijo')
+    }
+  })
+
+  stopBtn?.addEventListener('click', () => {
+    stopScan()
+    panel?.classList.add('hidden')
+  })
+
+  fileInput?.addEventListener('change', async () => {
+    const file = fileInput.files?.[0]
+    if (!file) return
+    try {
+      const code = await decodeQrFromFile(file)
+      if (code) onFound(code)
+      else showToast('QR ni bil zaznan — vnesite ročno')
+    } catch {
+      showToast('Branje fotografije ni uspelo')
+    }
+  })
+}
+
+function stockOptions(selected?: string) {
+  return [
+    `<option value="">— brez povezave —</option>`,
+    ...data.stock.map(
+      (s) =>
+        `<option value="${s.id}" ${selected === s.id ? 'selected' : ''}>${escapeHtml(s.name)} (${s.qty})</option>`,
+    ),
+  ].join('')
+}
+
+/* ===================== Nabava ===================== */
 function sortedRequests(filter?: RequestStatus | 'vse'): ProcurementRequest[] {
   let list = [...data.requests].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   if (filter && filter !== 'vse') list = list.filter((r) => r.status === filter)
@@ -175,11 +408,16 @@ function sortedRequests(filter?: RequestStatus | 'vse'): ProcurementRequest[] {
 }
 
 function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
+  const stock = r.stockItemId ? data.stock.find((s) => s.id === r.stockItemId) : undefined
   const supplier = r.supplierNote
-    ? `<p><strong>Dobavitelj / opomba:</strong> ${escapeHtml(r.supplierNote)}</p>`
+    ? `<p><strong>Dobavitelj:</strong> ${escapeHtml(r.supplierNote)}</p>`
     : ''
   const photo = r.photoDataUrl
     ? `<img class="photo-thumb" src="${r.photoDataUrl}" alt="Fotografija zahteve" />`
+    : ''
+  const qr = r.qrValue ? `<p><strong>QR:</strong> <code>${escapeHtml(r.qrValue)}</code></p>` : ''
+  const stockLink = stock
+    ? `<p><strong>Zaloga:</strong> ${escapeHtml(stock.name)} (${stock.qty} / min ${stock.minQty})</p>`
     : ''
   const history = r.history
     .map(
@@ -192,13 +430,20 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
     )
     .join('')
 
+  const suggestions = suggestSuppliers(r.category, r.title)
+  const datalist =
+    suggestions.length > 0
+      ? `<datalist id="sup-${r.id}">${suggestions.map((s) => `<option value="${escapeHtml(s.name)}"></option>`).join('')}</datalist>`
+      : ''
+
   let actions = ''
   if (mode === 'manage' && r.status !== 'prejeto' && r.status !== 'zavrnjeno') {
     actions = `
       <div class="stack" style="margin-top:12px">
-        <label class="field">Opomba dobavitelja (kdo/kje prodaja)
-          <input type="text" data-supplier="${r.id}" value="${escapeHtml(r.supplierNote)}" placeholder="npr. Merkur Celje, Art. 123" />
+        <label class="field">Dobavitelj (kdo/kje)
+          <input type="text" list="sup-${r.id}" data-supplier="${r.id}" value="${escapeHtml(r.supplierNote)}" placeholder="npr. Merkur Celje" autocomplete="off" />
         </label>
+        ${datalist}
         <div class="actions">
           ${r.status === 'odprto' ? `<button class="btn btn-secondary" type="button" data-status="${r.id}" data-to="naroceno">Označi naročeno</button>` : ''}
           <button class="btn btn-primary" type="button" data-status="${r.id}" data-to="prejeto">Označi prejeto</button>
@@ -217,9 +462,11 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
       <h3 class="request-title">${escapeHtml(r.title)}</h3>
       <div class="request-meta">
         <span>${escapeHtml(r.createdBy)}</span>
-        <span>${escapeHtml(r.workstationName)} · ${escapeHtml(r.slotLabel)}</span>
+        <span>${escapeHtml(r.workstationName)}${r.slotLabel ? ' · ' + escapeHtml(r.slotLabel) : ''}</span>
       </div>
       ${r.note ? `<p>${escapeHtml(r.note)}</p>` : ''}
+      ${qr}
+      ${stockLink}
       ${supplier}
       ${photo}
       ${actions}
@@ -237,8 +484,9 @@ function bindManageActions() {
       const req = data.requests.find((r) => r.id === id)
       if (!req) return
       req.supplierNote = input.value.trim()
+      if (req.supplierNote) rememberSupplier(req.supplierNote, req.category, req.title)
       persist()
-      showToast('Opomba shranjena')
+      showToast('Dobavitelj shranjen')
     })
   })
   app.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((btn) => {
@@ -249,6 +497,7 @@ function bindManageActions() {
       if (!req || !session) return
       const supplierInput = app.querySelector<HTMLInputElement>(`[data-supplier="${id}"]`)
       if (supplierInput) req.supplierNote = supplierInput.value.trim()
+      if (req.supplierNote) rememberSupplier(req.supplierNote, req.category, req.title)
       req.status = to
       req.history.push({
         at: new Date().toISOString(),
@@ -263,7 +512,6 @@ function bindManageActions() {
   })
 }
 
-/* ---------- Opravila ---------- */
 function renderTasks(editable: boolean): string {
   const tasks = [...data.tasks].sort((a, b) => {
     if (a.done !== b.done) return a.done ? 1 : -1
@@ -299,7 +547,7 @@ function renderTasks(editable: boolean): string {
       </label>
       <button class="btn btn-primary btn-block" type="submit">Dodaj opravilo</button>
     </form>`
-    : `<p class="muted">Opravila lahko ureja samo vodja nabave.</p>`
+    : `<p class="muted">Opravila lahko ureja samo vodja.</p>`
 
   return `
     <section class="card">
@@ -336,8 +584,7 @@ function bindTasks(editable: boolean) {
     })
     app.querySelectorAll<HTMLButtonElement>('[data-del-task]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const id = btn.dataset.delTask!
-        data.tasks = data.tasks.filter((t) => t.id !== id)
+        data.tasks = data.tasks.filter((t) => t.id !== btn.dataset.delTask)
         persist()
         showToast('Opravilo izbrisano')
         render()
@@ -347,8 +594,7 @@ function bindTasks(editable: boolean) {
   app.querySelectorAll<HTMLInputElement>('[data-toggle-task]').forEach((cb) => {
     cb.addEventListener('change', () => {
       if (!editable) return
-      const id = cb.dataset.toggleTask!
-      const task = data.tasks.find((t) => t.id === id)
+      const task = data.tasks.find((t) => t.id === cb.dataset.toggleTask)
       if (!task) return
       task.done = cb.checked
       persist()
@@ -357,67 +603,33 @@ function bindTasks(editable: boolean) {
   })
 }
 
-/* ---------- Vodja ---------- */
-function renderVodja() {
-  const tabs = [
-    tabBtn('zahteve', 'Odprte'),
-    tabBtn('zgodovina', 'Zgodovina'),
-    tabBtn('opravila', 'Opravila'),
-  ].join('')
+function renderNabava(): string {
+  const subs: Array<[NabavaSub, string]> = isVodja()
+    ? [
+        ['seznam', 'Zahteve'],
+        ['opravila', 'Opravila'],
+      ]
+    : [
+        ['nova', 'Nova'],
+        ['moje', 'Moje'],
+        ['seznam', 'Vse'],
+        ['opravila', 'Opravila'],
+      ]
 
-  let content = ''
-  if (tab === 'opravila') {
-    content = renderTasks(true)
-  } else if (tab === 'zgodovina') {
-    const list = sortedRequests('vse')
-    content =
-      list.length === 0
-        ? `<div class="card empty">Ni zahtev.</div>`
-        : list.map((r) => requestCard(r, 'view')).join('')
-  } else {
-    const filters: Array<RequestStatus | 'vse'> = ['odprto', 'naroceno', 'prejeto', 'zavrnjeno', 'vse']
-    const chips = filters
-      .map((f) => {
-        const label = f === 'vse' ? 'Vse' : STATUS_LABELS[f]
-        return `<button class="chip ${statusFilter === f ? 'active' : ''}" type="button" data-filter="${f}">${label}</button>`
-      })
-      .join('')
-    const list = sortedRequests(statusFilter)
-    content = `
-      <div class="filters">${chips}</div>
-      ${
-        list.length === 0
-          ? `<div class="card empty">Ni zahtev za ta filter.</div>`
-          : list.map((r) => requestCard(r, 'manage')).join('')
-      }`
-  }
+  const subNav = `<div class="subtabs">${subs
+    .map(
+      ([id, label]) =>
+        `<button class="chip ${nabavaSub === id ? 'active' : ''}" type="button" data-sub="${id}">${label}</button>`,
+    )
+    .join('')}</div>`
 
-  shell(content, tabs)
-  if (tab === 'opravila') bindTasks(true)
-  else if (tab === 'zahteve') {
-    bindManageActions()
-    app.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        statusFilter = btn.dataset.filter as RequestStatus | 'vse'
-        render()
-      })
-    })
-  }
-}
+  if (nabavaSub === 'opravila') return subNav + renderTasks(isVodja())
 
-/* ---------- Delavec ---------- */
-function renderDelavec() {
-  const tabs = [
-    tabBtn('nova', 'Nova'),
-    tabBtn('zahteve', 'Moje'),
-    tabBtn('zgodovina', 'Vse'),
-    tabBtn('opravila', 'Opravila'),
-  ].join('')
-
-  let content = ''
-  if (tab === 'nova') {
+  if (nabavaSub === 'nova') {
     const cats = CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('')
-    content = `
+    return (
+      subNav +
+      `
       <section class="card">
         <h2>Nova zahteva</h2>
         <form class="stack" id="req-form">
@@ -430,6 +642,10 @@ function renderDelavec() {
           <label class="field">Opomba
             <textarea name="note" maxlength="500" placeholder="Količina, merila, nujnost…"></textarea>
           </label>
+          <label class="field">Poveži z zalogo (neobvezno)
+            <select name="stockItemId">${stockOptions()}</select>
+          </label>
+          ${qrFieldHtml('req-qr')}
           <label class="field">Fotografija (neobvezno)
             <input name="photo" type="file" accept="image/*" capture="environment" />
           </label>
@@ -437,41 +653,57 @@ function renderDelavec() {
           <button class="btn btn-primary btn-block" type="submit">Oddaj zahtevo</button>
         </form>
       </section>`
-  } else if (tab === 'opravila') {
-    content = renderTasks(false)
-  } else if (tab === 'zahteve') {
-    const mine = sortedRequests('vse').filter(
-      (r) => r.slotId === session!.slotId && r.workstationId === session!.workstationId,
     )
-    content =
-      mine.length === 0
-        ? `<div class="card empty">Nimate še zahtev.</div>`
-        : mine.map((r) => requestCard(r, 'view')).join('')
-  } else {
-    const list = sortedRequests('vse')
-    content =
-      list.length === 0
-        ? `<div class="card empty">Ni zahtev.</div>`
-        : list.map((r) => requestCard(r, 'view')).join('')
   }
 
-  shell(content, tabs)
+  if (nabavaSub === 'moje') {
+    const mine = sortedRequests('vse').filter(
+      (r) =>
+        r.createdBy === session!.displayName ||
+        (session!.workstationId && r.workstationId === session!.workstationId),
+    )
+    return (
+      subNav +
+      (mine.length === 0
+        ? `<div class="card empty">Nimate še zahtev.</div>`
+        : mine.map((r) => requestCard(r, 'view')).join(''))
+    )
+  }
 
-  if (tab === 'opravila') bindTasks(false)
-  if (tab === 'nova') bindNewRequestForm()
+  // seznam
+  const filters: Array<RequestStatus | 'vse'> = ['odprto', 'naroceno', 'prejeto', 'zavrnjeno', 'vse']
+  const chips = filters
+    .map((f) => {
+      const label = f === 'vse' ? 'Vse' : STATUS_LABELS[f]
+      return `<button class="chip ${statusFilter === f ? 'active' : ''}" type="button" data-filter="${f}">${label}</button>`
+    })
+    .join('')
+  const list = sortedRequests(statusFilter)
+  const mode = isVodja() ? 'manage' : 'view'
+  return (
+    subNav +
+    `
+    <div class="filters">${chips}</div>
+    ${
+      list.length === 0
+        ? `<div class="card empty">Ni zahtev za ta filter.</div>`
+        : list.map((r) => requestCard(r, mode)).join('')
+    }`
+  )
 }
 
 function bindNewRequestForm() {
   const form = app.querySelector<HTMLFormElement>('#req-form')
-  const preview = app.querySelector<HTMLDivElement>('#photo-preview')!
+  const preview = app.querySelector<HTMLDivElement>('#photo-preview')
   let photoDataUrl: string | undefined
   const photoInput = form?.querySelector<HTMLInputElement>('input[name="photo"]')
+  bindQrField('req-qr')
 
   photoInput?.addEventListener('change', async () => {
     const file = photoInput.files?.[0]
     photoDataUrl = undefined
-    preview.innerHTML = ''
-    if (!file) return
+    if (preview) preview.innerHTML = ''
+    if (!file || !preview) return
     try {
       preview.innerHTML = `<p class="muted">Obdelujem fotografijo…</p>`
       photoDataUrl = await fileToDataUrl(file)
@@ -484,14 +716,19 @@ function bindNewRequestForm() {
 
   form?.addEventListener('submit', (e) => {
     e.preventDefault()
-    if (!session?.workstationId || !session.slotId) return
+    if (!session) return
     const fd = new FormData(form)
     const category = String(fd.get('category')) as Category
     const title = String(fd.get('title') || '').trim()
     const note = String(fd.get('note') || '').trim()
+    const stockItemId = String(fd.get('stockItemId') || '') || undefined
+    const qrValue = app.querySelector<HTMLInputElement>('#req-qr')?.value.trim() || undefined
     if (!title) return
-    const ws = findWorkstation(session.workstationId)!
-    const slot = findSlot(session.workstationId, session.slotId)!
+
+    let workstationId = session.workstationId || 'rocna-delavnica'
+    let slotId = session.slotId
+    const ws = findWorkstation(workstationId) || WORKSTATIONS[0]
+    const slot = (slotId && findSlot(ws.id, slotId)) || ws.slots[0]
     const now = new Date().toISOString()
     const req: ProcurementRequest = {
       id: uid('req'),
@@ -505,6 +742,8 @@ function bindNewRequestForm() {
       title,
       note,
       photoDataUrl,
+      qrValue,
+      stockItemId,
       status: 'odprto',
       supplierNote: '',
       history: [{ at: now, status: 'odprto', by: session.displayName }],
@@ -512,9 +751,456 @@ function bindNewRequestForm() {
     data.requests.unshift(req)
     persist()
     showToast('Zahteva oddana')
-    tab = 'zahteve'
+    nabavaSub = isVodja() ? 'seznam' : 'moje'
     render()
   })
+}
+
+/* ===================== Zaloge ===================== */
+function renderZaloge(): string {
+  const sorted = [...data.stock].sort((a, b) => a.name.localeCompare(b.name, 'sl'))
+  const list =
+    sorted.length === 0
+      ? `<div class="empty">Ni artiklov na zalogi.</div>`
+      : sorted
+          .map((s) => {
+            const low = s.qty <= s.minQty
+            return `
+            <article class="card ${low ? 'low-stock' : ''}" data-stock="${s.id}">
+              <div class="request-meta">
+                <span>${escapeHtml(s.category)}</span>
+                ${low ? '<span class="status zavrnjeno">Nizka zaloga</span>' : ''}
+                ${s.qrValue ? `<code class="qr-tag">${escapeHtml(s.qrValue)}</code>` : ''}
+              </div>
+              <h3 class="request-title">${escapeHtml(s.name)}</h3>
+              <div class="request-meta">
+                <span><strong>${s.qty}</strong> kos (min ${s.minQty})</span>
+                <span>${escapeHtml(s.location || '—')}</span>
+              </div>
+              ${
+                isVodja()
+                  ? `<div class="actions">
+                      <button class="btn btn-secondary" type="button" data-edit-stock="${s.id}">Uredi</button>
+                      <button class="btn btn-danger" type="button" data-del-stock="${s.id}">Izbriši</button>
+                    </div>`
+                  : ''
+              }
+            </article>`
+          })
+          .join('')
+
+  const form = isVodja()
+    ? `
+    <section class="card">
+      <h2>Nova zaloga</h2>
+      <form class="stack" id="stock-form">
+        <label class="field">Naziv
+          <input name="name" required maxlength="120" />
+        </label>
+        <label class="field">Kategorija
+          <input name="category" list="cat-list" required maxlength="60" />
+          <datalist id="cat-list">${CATEGORIES.map((c) => `<option value="${c}"></option>`).join('')}</datalist>
+        </label>
+        <div class="row-2">
+          <label class="field">Količina
+            <input name="qty" type="number" min="0" step="1" value="0" required />
+          </label>
+          <label class="field">Min. količina
+            <input name="minQty" type="number" min="0" step="1" value="1" required />
+          </label>
+        </div>
+        <label class="field">Lokacija
+          <input name="location" maxlength="80" placeholder="npr. Polica A3" />
+        </label>
+        ${qrFieldHtml('stock-qr')}
+        <button class="btn btn-primary btn-block" type="submit">Dodaj</button>
+      </form>
+    </section>`
+    : `<p class="muted card">Zaloge si lahko ogledate. Urejanje je za vodjo.</p>`
+
+  return form + `<section class="card"><h2>Seznam zalog</h2>${list}</section>`
+}
+
+function bindZaloge() {
+  if (isVodja()) {
+    bindQrField('stock-qr')
+    app.querySelector<HTMLFormElement>('#stock-form')?.addEventListener('submit', (e) => {
+      e.preventDefault()
+      const form = e.target as HTMLFormElement
+      const fd = new FormData(form)
+      const item: StockItem = {
+        id: uid('stock'),
+        name: String(fd.get('name') || '').trim(),
+        category: String(fd.get('category') || '').trim(),
+        qty: Number(fd.get('qty') || 0),
+        minQty: Number(fd.get('minQty') || 0),
+        location: String(fd.get('location') || '').trim(),
+        qrValue: app.querySelector<HTMLInputElement>('#stock-qr')?.value.trim() || undefined,
+        updatedAt: new Date().toISOString(),
+      }
+      if (!item.name) return
+      data.stock.push(item)
+      persist()
+      showToast('Artikel dodan')
+      render()
+    })
+
+    app.querySelectorAll<HTMLButtonElement>('[data-del-stock]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!confirm('Izbrisati artikel?')) return
+        data.stock = data.stock.filter((s) => s.id !== btn.dataset.delStock)
+        persist()
+        render()
+      })
+    })
+
+    app.querySelectorAll<HTMLButtonElement>('[data-edit-stock]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const item = data.stock.find((s) => s.id === btn.dataset.editStock)
+        if (!item) return
+        const qty = prompt('Nova količina', String(item.qty))
+        if (qty === null) return
+        const n = Number(qty)
+        if (Number.isNaN(n) || n < 0) {
+          showToast('Neveljavna količina')
+          return
+        }
+        item.qty = n
+        item.updatedAt = new Date().toISOString()
+        persist()
+        showToast('Zaloga posodobljena')
+        render()
+      })
+    })
+  }
+}
+
+/* ===================== Okvare ===================== */
+function renderOkvare(): string {
+  const filters: Array<FaultStatus | 'vse'> = ['novo', 'v_delu', 'reseno', 'vse']
+  const chips = filters
+    .map((f) => {
+      const label = f === 'vse' ? 'Vse' : FAULT_STATUS_LABELS[f]
+      return `<button class="chip ${faultFilter === f ? 'active' : ''}" type="button" data-fault-filter="${f}">${label}</button>`
+    })
+    .join('')
+
+  const machines = MACHINES.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')
+
+  const form = `
+    <section class="card">
+      <h2>Prijava okvare</h2>
+      <form class="stack" id="fault-form">
+        <label class="field">Stroj
+          <select name="machine" required>${machines}</select>
+        </label>
+        <label class="field">Opis
+          <textarea name="description" required maxlength="800" placeholder="Kaj se je zgodilo?"></textarea>
+        </label>
+        <label class="field">Fotografija (neobvezno)
+          <input name="photo" type="file" accept="image/*" capture="environment" />
+        </label>
+        <div id="fault-preview"></div>
+        <button class="btn btn-primary btn-block" type="submit">Prijavi okvaro</button>
+      </form>
+    </section>`
+
+  let list = [...data.faults].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  if (faultFilter !== 'vse') list = list.filter((f) => f.status === faultFilter)
+
+  const cards =
+    list.length === 0
+      ? `<div class="card empty">Ni okvar.</div>`
+      : list
+          .map((f) => {
+            const hist = f.history
+              .map(
+                (h) => `
+              <div class="history-item">
+                <span class="status fault-${h.status}">${FAULT_STATUS_LABELS[h.status]}</span>
+                <span class="muted"> · ${formatDateTime(h.at)} · ${escapeHtml(h.by)}</span>
+              </div>`,
+              )
+              .join('')
+            const actions = isVodja()
+              ? `<div class="actions">
+                  ${f.status === 'novo' ? `<button class="btn btn-secondary" type="button" data-fault-status="${f.id}" data-to="v_delu">V delo</button>` : ''}
+                  ${f.status !== 'reseno' ? `<button class="btn btn-primary" type="button" data-fault-status="${f.id}" data-to="reseno">Rešeno</button>` : ''}
+                </div>`
+              : ''
+            return `
+              <article class="card">
+                <div class="request-meta">
+                  <span class="status fault-${f.status}">${FAULT_STATUS_LABELS[f.status]}</span>
+                  <span>${formatDateTime(f.createdAt)}</span>
+                </div>
+                <h3 class="request-title">${escapeHtml(f.machine)}</h3>
+                <p>${escapeHtml(f.description)}</p>
+                <div class="muted">${escapeHtml(f.createdBy)}</div>
+                ${f.photoDataUrl ? `<img class="photo-thumb" src="${f.photoDataUrl}" alt="Okvara" />` : ''}
+                ${actions}
+                <details style="margin-top:10px"><summary class="muted">Zgodovina</summary>${hist}</details>
+              </article>`
+          })
+          .join('')
+
+  return form + `<div class="filters">${chips}</div>` + cards
+}
+
+function bindOkvare() {
+  let photoDataUrl: string | undefined
+  const preview = app.querySelector('#fault-preview')
+  const photoInput = app.querySelector<HTMLInputElement>('#fault-form input[name="photo"]')
+  photoInput?.addEventListener('change', async () => {
+    const file = photoInput.files?.[0]
+    photoDataUrl = undefined
+    if (preview) preview.innerHTML = ''
+    if (!file || !preview) return
+    try {
+      photoDataUrl = await fileToDataUrl(file)
+      preview.innerHTML = `<img class="photo-thumb" src="${photoDataUrl}" alt="Predogled" />`
+    } catch {
+      showToast('Fotografije ni bilo mogoče obdelati')
+    }
+  })
+
+  app.querySelector('#fault-form')?.addEventListener('submit', (e) => {
+    e.preventDefault()
+    if (!session) return
+    const fd = new FormData(e.target as HTMLFormElement)
+    const now = new Date().toISOString()
+    const fault: MachineFault = {
+      id: uid('fault'),
+      machine: String(fd.get('machine') || ''),
+      description: String(fd.get('description') || '').trim(),
+      photoDataUrl,
+      status: 'novo',
+      createdAt: now,
+      createdBy: session.displayName,
+      history: [{ at: now, status: 'novo', by: session.displayName }],
+    }
+    if (!fault.description) return
+    data.faults.unshift(fault)
+    persist()
+    showToast('Okvara prijavljena')
+    render()
+  })
+
+  app.querySelectorAll<HTMLButtonElement>('[data-fault-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      faultFilter = btn.dataset.faultFilter as FaultStatus | 'vse'
+      render()
+    })
+  })
+
+  app.querySelectorAll<HTMLButtonElement>('[data-fault-status]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!session) return
+      const f = data.faults.find((x) => x.id === btn.dataset.faultStatus)
+      if (!f) return
+      const to = btn.dataset.to as FaultStatus
+      f.status = to
+      f.history.push({ at: new Date().toISOString(), status: to, by: session.displayName })
+      persist()
+      showToast(FAULT_STATUS_LABELS[to])
+      render()
+    })
+  })
+}
+
+/* ===================== Servisi Okuma ===================== */
+function renderServisi(): string {
+  const machines = OKUMA_MACHINES.map(
+    (m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`,
+  ).join('')
+
+  const form = isVodja()
+    ? `
+    <section class="card">
+      <h2>Nov servis</h2>
+      <form class="stack" id="service-form">
+        <label class="field">Datum
+          <input name="date" type="date" required />
+        </label>
+        <label class="field">Stroj
+          <select name="machine" required>${machines}</select>
+        </label>
+        <label class="field">Opomba
+          <textarea name="note" maxlength="400" placeholder="Vrsta servisa, deli…"></textarea>
+        </label>
+        <label class="check-row">
+          <input name="done" type="checkbox" /> Že opravljeno
+        </label>
+        <button class="btn btn-primary btn-block" type="submit">Dodaj</button>
+      </form>
+    </section>`
+    : `<p class="muted card">Servise ureja vodja. Spodaj je pregled.</p>`
+
+  const sorted = [...data.services].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1
+    return a.date.localeCompare(b.date)
+  })
+
+  const list =
+    sorted.length === 0
+      ? `<div class="card empty">Ni načrtovanih servisov.</div>`
+      : sorted
+          .map((s) => {
+            const past = !s.done && s.date < new Date().toISOString().slice(0, 10)
+            return `
+            <article class="card ${s.done ? 'done-soft' : ''}">
+              <div class="request-meta">
+                <span class="status ${s.done ? 'prejeto' : past ? 'zavrnjeno' : 'naroceno'}">${s.done ? 'Opravljeno' : past ? 'Zamujeno' : 'Načrtovano'}</span>
+                <span>${formatDate(s.date)}</span>
+              </div>
+              <h3 class="request-title">${escapeHtml(s.machine)}</h3>
+              ${s.note ? `<p>${escapeHtml(s.note)}</p>` : ''}
+              <div class="muted">${escapeHtml(s.createdBy)}</div>
+              ${
+                isVodja()
+                  ? `<div class="actions">
+                      <label class="check-row">
+                        <input type="checkbox" data-toggle-service="${s.id}" ${s.done ? 'checked' : ''} /> Opravljeno
+                      </label>
+                      <button class="btn btn-danger" type="button" data-del-service="${s.id}">Izbriši</button>
+                    </div>`
+                  : ''
+              }
+            </article>`
+          })
+          .join('')
+
+  return form + list
+}
+
+function bindServisi() {
+  if (!isVodja()) return
+  app.querySelector('#service-form')?.addEventListener('submit', (e) => {
+    e.preventDefault()
+    if (!session) return
+    const fd = new FormData(e.target as HTMLFormElement)
+    const svc: OkumaService = {
+      id: uid('svc'),
+      date: String(fd.get('date') || ''),
+      machine: String(fd.get('machine') || ''),
+      note: String(fd.get('note') || '').trim(),
+      done: Boolean(fd.get('done')),
+      createdAt: new Date().toISOString(),
+      createdBy: session.displayName,
+    }
+    data.services.push(svc)
+    persist()
+    showToast('Servis dodan')
+    render()
+  })
+  app.querySelectorAll<HTMLInputElement>('[data-toggle-service]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const s = data.services.find((x) => x.id === cb.dataset.toggleService)
+      if (!s) return
+      s.done = cb.checked
+      persist()
+      render()
+    })
+  })
+  app.querySelectorAll<HTMLButtonElement>('[data-del-service]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!confirm('Izbrisati servis?')) return
+      data.services = data.services.filter((s) => s.id !== btn.dataset.delService)
+      persist()
+      render()
+    })
+  })
+}
+
+/* ===================== Zgodovina ===================== */
+function renderZgodovina(): string {
+  const reqs = sortedRequests('vse')
+  const faults = [...data.faults].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const services = [...data.services].sort((a, b) => b.date.localeCompare(a.date))
+
+  return `
+    <section class="card">
+      <h2>Zgodovina nabave</h2>
+      <p class="muted">${reqs.length} zahtev</p>
+    </section>
+    ${reqs.length === 0 ? '<div class="card empty">Ni zahtev.</div>' : reqs.map((r) => requestCard(r, 'view')).join('')}
+    <section class="card"><h2>Okvare — arhiv</h2></section>
+    ${
+      faults.length === 0
+        ? '<div class="card empty">Ni okvar.</div>'
+        : faults
+            .map(
+              (f) => `
+        <article class="card">
+          <div class="request-meta">
+            <span class="status fault-${f.status}">${FAULT_STATUS_LABELS[f.status]}</span>
+            <span>${formatDateTime(f.createdAt)}</span>
+          </div>
+          <h3 class="request-title">${escapeHtml(f.machine)}</h3>
+          <p>${escapeHtml(f.description)}</p>
+        </article>`,
+            )
+            .join('')
+    }
+    <section class="card"><h2>Servisi</h2></section>
+    ${
+      services.length === 0
+        ? '<div class="card empty">Ni servisov.</div>'
+        : services
+            .map(
+              (s) => `
+        <article class="card">
+          <div class="request-meta">
+            <span class="status ${s.done ? 'prejeto' : 'naroceno'}">${s.done ? 'Opravljeno' : 'Načrtovano'}</span>
+            <span>${formatDate(s.date)}</span>
+          </div>
+          <h3 class="request-title">${escapeHtml(s.machine)}</h3>
+          ${s.note ? `<p>${escapeHtml(s.note)}</p>` : ''}
+        </article>`,
+            )
+            .join('')
+    }`
+}
+
+/* ===================== App shell bind ===================== */
+function renderApp() {
+  let content = ''
+  if (tab === 'nabava') content = renderNabava()
+  else if (tab === 'zaloge') content = renderZaloge()
+  else if (tab === 'okvare') content = renderOkvare()
+  else if (tab === 'servisi') content = renderServisi()
+  else content = renderZgodovina()
+
+  shell(content)
+
+  if (tab === 'nabava') {
+    app.querySelectorAll<HTMLButtonElement>('[data-sub]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        nabavaSub = btn.dataset.sub as NabavaSub
+        render()
+      })
+    })
+    if (nabavaSub === 'opravila') bindTasks(isVodja())
+    else if (nabavaSub === 'nova') bindNewRequestForm()
+    else if (nabavaSub === 'seznam' && isVodja()) {
+      bindManageActions()
+      app.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          statusFilter = btn.dataset.filter as RequestStatus | 'vse'
+          render()
+        })
+      })
+    } else if (nabavaSub === 'seznam') {
+      app.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          statusFilter = btn.dataset.filter as RequestStatus | 'vse'
+          render()
+        })
+      })
+    }
+  } else if (tab === 'zaloge') bindZaloge()
+  else if (tab === 'okvare') bindOkvare()
+  else if (tab === 'servisi') bindServisi()
 }
 
 render()

@@ -43,7 +43,25 @@ export const CATEGORIES: Category[] = [
   'Oprema',
   'Papir za brisače',
   'Kava',
+  'Drugo',
 ]
+
+export const MACHINES = [
+  'Okuma MU-400V II',
+  'Okuma Genos',
+  'MB-46VAE',
+  'MB-56VA',
+  'Stružnica',
+  'Žična EDM',
+  'Drugi stroj',
+] as const
+
+export const OKUMA_MACHINES = [
+  'Okuma MU-400V II',
+  'Okuma Genos',
+  'MB-46VAE',
+  'MB-56VA',
+] as const
 
 export const STATUS_LABELS: Record<string, string> = {
   odprto: 'Odprto',
@@ -52,7 +70,11 @@ export const STATUS_LABELS: Record<string, string> = {
   zavrnjeno: 'Zavrnjeno',
 }
 
-export const VODJA_NAME = 'Vodja nabave'
+export const FAULT_STATUS_LABELS: Record<string, string> = {
+  novo: 'Novo',
+  v_delu: 'V delu',
+  reseno: 'Rešeno',
+}
 
 export function findWorkstation(id: string) {
   return WORKSTATIONS.find((w) => w.id === id)

@@ -1,33 +1,64 @@
 import type { AppData, Session } from './types.ts'
 
-const DATA_KEY = 'nabava-orodjarna-data-v1'
-const SESSION_KEY = 'nabava-orodjarna-session-v1'
+const DATA_KEY = 'nabava-orodjarna-data-v2'
+const LEGACY_DATA_KEY = 'nabava-orodjarna-data-v1'
+const SESSION_KEY = 'nabava-orodjarna-session-v2'
+const LEGACY_SESSION_KEY = 'nabava-orodjarna-session-v1'
 
-const emptyData = (): AppData => ({ requests: [], tasks: [] })
+export const emptyData = (): AppData => ({
+  version: 2,
+  requests: [],
+  tasks: [],
+  stock: [],
+  faults: [],
+  services: [],
+  suppliers: [],
+  users: [],
+})
+
+function migrateLegacy(raw: unknown): AppData {
+  const base = emptyData()
+  if (!raw || typeof raw !== 'object') return base
+  const parsed = raw as Partial<AppData> & { requests?: unknown[]; tasks?: unknown[] }
+  return {
+    ...base,
+    requests: Array.isArray(parsed.requests) ? (parsed.requests as AppData['requests']) : [],
+    tasks: Array.isArray(parsed.tasks) ? (parsed.tasks as AppData['tasks']) : [],
+    stock: Array.isArray(parsed.stock) ? parsed.stock : [],
+    faults: Array.isArray(parsed.faults) ? parsed.faults : [],
+    services: Array.isArray(parsed.services) ? parsed.services : [],
+    suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : [],
+    users: Array.isArray(parsed.users) ? parsed.users : [],
+    lastUserId: typeof parsed.lastUserId === 'string' ? parsed.lastUserId : undefined,
+  }
+}
 
 export function loadData(): AppData {
   try {
-    const raw = localStorage.getItem(DATA_KEY)
+    const raw = localStorage.getItem(DATA_KEY) ?? localStorage.getItem(LEGACY_DATA_KEY)
     if (!raw) return emptyData()
-    const parsed = JSON.parse(raw) as AppData
-    return {
-      requests: Array.isArray(parsed.requests) ? parsed.requests : [],
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+    const data = migrateLegacy(JSON.parse(raw))
+    if (!localStorage.getItem(DATA_KEY)) {
+      localStorage.setItem(DATA_KEY, JSON.stringify(data))
     }
+    return data
   } catch {
     return emptyData()
   }
 }
 
 export function saveData(data: AppData): void {
+  data.version = 2
   localStorage.setItem(DATA_KEY, JSON.stringify(data))
 }
 
 export function loadSession(): Session | null {
   try {
-    const raw = localStorage.getItem(SESSION_KEY)
+    const raw = localStorage.getItem(SESSION_KEY) ?? localStorage.getItem(LEGACY_SESSION_KEY)
     if (!raw) return null
-    return JSON.parse(raw) as Session
+    const s = JSON.parse(raw) as Session
+    if (!s.userId || !s.displayName || !s.role) return null
+    return s
   } catch {
     return null
   }
@@ -69,4 +100,12 @@ export function formatDate(iso: string): string {
   } catch {
     return iso
   }
+}
+
+export function escapeHtml(s: string): string {
+  return s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
 }

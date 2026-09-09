@@ -12,5 +12,8 @@
     "typescript": "~6.0.2",
     "vite": "^8.2.2"
   },
-  "description": "Prototip nabave orodjarne"
+  "description": "Prototip nabave orodjarne",
+  "dependencies": {
+    "jsqr": "^1.4.0"
+  }
 }

@@ -1,32 +1,42 @@
 # Nabava — Orodjarna
 
-Notranji prototip aplikacije za nabavo v orodjarni (Andrej Habjan).
-Podatki se shranjujejo lokalno v brskalniku (localStorage) - ni streznika in ni pravih gesel.
+Notranja aplikacija za orodjarno (Andrej Habjan): nabava, zaloge, okvare strojev, servisi Okuma.
 
-## Odpiranje lokalno
+**Podatki so lokalni** (localStorage v brskalniku). Ni strežnika — sinhronizacija med telefoni/računalniki zahteva zaledje (kasneje). PIN je lahka lokalna zaščita (SHA-256), ne prava varnost.
 
-Zahteve: Bun ali Node.js.
-
-    cd nabava-orodjarna
-    bun install
-    bun run dev
-
-Odpri URL (npr. http://localhost:5173/nabava-orodjarna/).
-
-    bun run build
-    bun run preview
-
-## GitHub Pages
+## Živa stran
 
 https://ashblody.github.io/nabava-orodjarna/
 
-base: /nabava-orodjarna/ ; veja gh-pages.
+## Funkcije
 
-## Vloge
+- **Nabava** — zahteve, kategorije, fotografije, QR, dobavitelji (predlogi), opravila
+- **Zaloge** — količina, min. količina, lokacija, QR, opozorilo nizke zaloge
+- **Okvare** — prijava okvare stroja (Okuma, Genos, MB-*, …), foto, statusi, zgodovina
+- **Servisi** — koledar/seznam servisov Okuma (vodja ureja)
+- **Zgodovina** — pregled zahtev, okvar in servisov
+- **Prijava** — lokalni računi (ime + PIN), vloga delavec/vodja, zapomnjen zadnji uporabnik
+- **QR** — kamera / fotografija (jsQR) ali ročni vnos
 
-- Vodja nabave: zahteve, statusi, dobavitelj, opravila
-- Delavec: postaja, nova zahteva, fotografija
+## Lokalni zagon
+
+Zahteve: Bun ali Node.js.
+
+```bash
+cd nabava-orodjarna
+bun install
+bun run dev
+```
+
+Odpri npr. http://localhost:5173/nabava-orodjarna/
+
+```bash
+bun run build
+bun run preview
+```
+
+`base`: `/nabava-orodjarna/` · GitHub Pages veja `gh-pages`.
 
 ## Tehnologija
 
-Vite + TypeScript, vanilla DOM, CSS. Brez zaledja.
+Vite + TypeScript, vanilla DOM, CSS, jsQR. Brez zaledja. PWA-prijazno (manifest).
