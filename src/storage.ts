@@ -49,7 +49,6 @@ function normalizeRequest(raw: unknown): ProcurementRequest | null {
     urgency: normalizeUrgency(r.urgency),
     photoDataUrl: typeof r.photoDataUrl === 'string' ? r.photoDataUrl : undefined,
     qrValue: typeof r.qrValue === 'string' ? r.qrValue : undefined,
-    stockItemId: typeof r.stockItemId === 'string' ? r.stockItemId : undefined,
     status: (r.status as ProcurementRequest['status']) || 'odprto',
     supplierNote: typeof r.supplierNote === 'string' ? r.supplierNote : '',
     history: Array.isArray(r.history) ? r.history : [],

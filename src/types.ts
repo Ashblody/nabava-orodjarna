@@ -4,18 +4,17 @@ export type RequestStatus = 'odprto' | 'naroceno' | 'prejeto' | 'zavrnjeno'
 
 export type Urgency = 'nizka' | 'normalna' | 'visoka'
 
-export type FaultStatus = 'novo' | 'v_delu' | 'reseno'
-
 export type Category =
   | 'Material'
   | 'Svedri'
+  | 'Navojni svedri'
   | 'Rezkarji'
   | 'Oprema'
   | 'Papir za brisače'
   | 'Kava'
   | 'Drugo'
 
-export type MainTab = 'nabava' | 'zaloge' | 'okvare' | 'servisi' | 'zgodovina'
+export type MainTab = 'nabava' | 'servisi' | 'zgodovina'
 
 export interface WorkstationSlot {
   id: string
@@ -65,7 +64,6 @@ export interface ProcurementRequest {
   urgency: Urgency
   photoDataUrl?: string
   qrValue?: string
-  stockItemId?: string
   status: RequestStatus
   supplierNote: string
   history: StatusEvent[]
@@ -78,35 +76,6 @@ export interface Task {
   done: boolean
   createdAt: string
   createdBy: string
-}
-
-export interface StockItem {
-  id: string
-  name: string
-  category: string
-  qty: number
-  minQty: number
-  location: string
-  qrValue?: string
-  updatedAt: string
-}
-
-export interface FaultEvent {
-  at: string
-  status: FaultStatus
-  by: string
-  note?: string
-}
-
-export interface MachineFault {
-  id: string
-  machine: string
-  description: string
-  photoDataUrl?: string
-  status: FaultStatus
-  createdAt: string
-  createdBy: string
-  history: FaultEvent[]
 }
 
 export interface OkumaService {
@@ -131,8 +100,8 @@ export interface AppData {
   version: number
   requests: ProcurementRequest[]
   tasks: Task[]
-  stock: StockItem[]
-  faults: MachineFault[]
+  stock: unknown[]
+  faults: unknown[]
   services: OkumaService[]
   suppliers: SupplierRecord[]
   users: UserAccount[]

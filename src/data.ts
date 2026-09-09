@@ -39,6 +39,7 @@ export const WORKSTATIONS: Workstation[] = [
 export const CATEGORIES: Category[] = [
   'Material',
   'Svedri',
+  'Navojni svedri',
   'Rezkarji',
   'Oprema',
   'Papir za brisače',
@@ -46,15 +47,6 @@ export const CATEGORIES: Category[] = [
   'Drugo',
 ]
 
-export const MACHINES = [
-  'Okuma MU-400V II',
-  'Okuma Genos',
-  'MB-46VAE',
-  'MB-56VA',
-  'Stružnica',
-  'Žična EDM',
-  'Drugi stroj',
-] as const
 
 export const OKUMA_MACHINES = [
   'Okuma MU-400V II',
@@ -86,11 +78,6 @@ export const URGENCY_RANK: Record<Urgency, number> = {
 
 export const ALL_URGENCIES: Urgency[] = ['nizka', 'normalna', 'visoka']
 
-export const FAULT_STATUS_LABELS: Record<string, string> = {
-  novo: 'Novo',
-  v_delu: 'V delu',
-  reseno: 'Rešeno',
-}
 
 export function findWorkstation(id: string) {
   return WORKSTATIONS.find((w) => w.id === id)

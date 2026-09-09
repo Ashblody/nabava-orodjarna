@@ -3,8 +3,6 @@ import {
   ALL_STATUSES,
   ALL_URGENCIES,
   CATEGORIES,
-  FAULT_STATUS_LABELS,
-  MACHINES,
   OKUMA_MACHINES,
   STATUS_LABELS,
   URGENCY_LABELS,
@@ -35,14 +33,11 @@ import {
 import type {
   AppData,
   Category,
-  FaultStatus,
   MainTab,
-  MachineFault,
   OkumaService,
   ProcurementRequest,
   RequestStatus,
   Session,
-  StockItem,
   SupplierRecord,
   Task,
   Urgency,
@@ -59,7 +54,6 @@ let tab: MainTab = 'nabava'
 let nabavaSub: NabavaSub = 'seznam'
 let statusFilter: RequestStatus | 'vse' = 'odprto'
 let urgencyFilter: Urgency | 'vse' = 'vse'
-let faultFilter: FaultStatus | 'vse' = 'novo'
 let detailRequestId: string | null = null
 let toastTimer: number | undefined
 let cameraStream: MediaStream | null = null
@@ -180,24 +174,23 @@ function howtoPanel(): string {
         <li><strong>Nabava</strong> — oddaj zahtevo (z nujnostjo), vodja naroči in označi prejeto.</li>
         <li><strong>Odpri kartico</strong> — tapni zahtevo za podrobnosti in spremembo statusa (tudi nazaj).</li>
         <li><strong>Izvoz</strong> — Excel (CSV) ali Word s seznama / zgodovine.</li>
-        <li><strong>Zaloge · Okvare · Servisi</strong> — ločeni zavihki; QR kjer je smiselno.</li>
+        <li><strong>Servisi</strong> — načrtovanje servisov Okuma.</li>
       </ol>
       <p class="muted small tip-line">Podatki ostanejo v tem brskalniku (ni sinhronizacije med telefoni).</p>
     </section>`
 }
 
 function shell(content: string) {
-  const tabs: Array<[MainTab, string, string]> = [
-    ['nabava', 'Nabava', 'Zahteve'],
-    ['zaloge', 'Zaloge', 'Artikli'],
-    ['okvare', 'Okvare', 'Stroji'],
-    ['servisi', 'Servisi', 'Okuma'],
-    ['zgodovina', 'Zgodovina', 'Arhiv'],
+  const tabs: Array<[MainTab, string, string, string]> = [
+    ['nabava', '📦', 'Nabava', 'Zahteve'],
+    ['servisi', '🔧', 'Servisi', 'Okuma'],
+    ['zgodovina', '🗂️', 'Zgodovina', 'Arhiv'],
   ]
   const tabsHtml = tabs
     .map(
-      ([id, label, hint]) =>
-        `<button class="tab ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">
+      ([id, icon, label, hint]) =>
+        `<button class="tab tab-${id} ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">
+          <span class="tab-icon">${icon}</span>
           <span class="tab-label">${label}</span>
           <span class="tab-hint">${hint}</span>
         </button>`,
@@ -461,16 +454,6 @@ function bindQrField(inputId: string) {
   })
 }
 
-function stockOptions(selected?: string) {
-  return [
-    `<option value="">— brez povezave —</option>`,
-    ...data.stock.map(
-      (s) =>
-        `<option value="${s.id}" ${selected === s.id ? 'selected' : ''}>${escapeHtml(s.name)} (${s.qty})</option>`,
-    ),
-  ].join('')
-}
-
 function urgencyFieldHtml(selected: Urgency = 'normalna', name = 'urgency'): string {
   const opts = ALL_URGENCIES.map(
     (u) =>
@@ -479,8 +462,7 @@ function urgencyFieldHtml(selected: Urgency = 'normalna', name = 'urgency'): str
   return `
     <label class="field">Nujnost
       <select name="${name}" required>${opts}</select>
-    </label>
-    <p class="muted small field-hint">Tri faze: Ni nujno · Normalno · Nujno (rdeče na seznamu).</p>`
+    </label>`
 }
 
 function urgencyBadge(u: Urgency): string {
@@ -513,15 +495,21 @@ function nabavljeno(): ProcurementRequest[] {
 }
 
 function exportBar(scope: 'open' | 'history' | 'all'): string {
+  const scopeLabel =
+    scope === 'open'
+      ? 'Odprto / za naročilo'
+      : scope === 'history'
+        ? 'Samo nabavljeno (prejeto)'
+        : 'Vse zahteve'
   return `
     <div class="export-bar card">
       <div>
         <h3 class="export-title">Izvoz</h3>
-        <p class="muted small">Excel = CSV (UTF-8, odpre se v Excelu). Word = .doc (HTML).</p>
+        <p class="muted small">${scopeLabel}</p>
       </div>
-      <div class="actions">
-        <button class="btn btn-secondary" type="button" data-export="excel" data-scope="${scope}">Izvoz Excel</button>
-        <button class="btn btn-secondary" type="button" data-export="word" data-scope="${scope}">Izvoz Word</button>
+      <div class="actions export-actions">
+        <button class="btn btn-export-excel" type="button" data-export="excel" data-scope="${scope}">Excel (CSV)</button>
+        <button class="btn btn-export-word" type="button" data-export="word" data-scope="${scope}">Word</button>
       </div>
     </div>`
 }
@@ -559,7 +547,6 @@ function bindExportButtons() {
 }
 
 function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
-  const stock = r.stockItemId ? data.stock.find((s) => s.id === r.stockItemId) : undefined
   const supplier = r.supplierNote
     ? `<p><strong>Dobavitelj:</strong> ${escapeHtml(r.supplierNote)}</p>`
     : ''
@@ -567,9 +554,6 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
     ? `<img class="photo-thumb" src="${r.photoDataUrl}" alt="Fotografija zahteve" />`
     : ''
   const qr = r.qrValue ? `<p><strong>QR:</strong> <code>${escapeHtml(r.qrValue)}</code></p>` : ''
-  const stockLink = stock
-    ? `<p><strong>Zaloga:</strong> ${escapeHtml(stock.name)} (${stock.qty} / min ${stock.minQty})</p>`
-    : ''
 
   return `
     <article class="card request-card urgency-card-${r.urgency}" data-open-request="${r.id}" role="button" tabindex="0">
@@ -586,10 +570,9 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
       </div>
       ${r.note ? `<p class="clamp-2">${escapeHtml(r.note)}</p>` : ''}
       ${qr}
-      ${stockLink}
       ${supplier}
       ${photo}
-      <p class="muted small tap-hint">${mode === 'manage' ? 'Odpri za status, dobavitelja in urejanje →' : 'Odpri podrobnosti →'}</p>
+      <p class="muted small tap-hint">${mode === 'manage' ? 'Odpri →' : 'Podrobnosti →'}</p>
     </article>`
 }
 
@@ -607,7 +590,6 @@ function setRequestStatus(req: ProcurementRequest, to: RequestStatus, note?: str
 }
 
 function renderRequestDetail(r: ProcurementRequest): string {
-  const stock = r.stockItemId ? data.stock.find((s) => s.id === r.stockItemId) : undefined
   const history = r.history
     .map(
       (h) => `
@@ -656,13 +638,11 @@ function renderRequestDetail(r: ProcurementRequest): string {
       </div>
       ${r.note ? `<p>${escapeHtml(r.note)}</p>` : ''}
       ${r.qrValue ? `<p><strong>QR:</strong> <code>${escapeHtml(r.qrValue)}</code></p>` : ''}
-      ${stock ? `<p><strong>Zaloga:</strong> ${escapeHtml(stock.name)} (${stock.qty} / min ${stock.minQty})</p>` : ''}
       ${r.photoDataUrl ? `<img class="photo-thumb" src="${r.photoDataUrl}" alt="Fotografija" />` : ''}
     </section>
 
     <section class="card stack">
-      <h3>Status (prosto)</h3>
-      <p class="muted small section-hint">Lahko greš naprej ali nazaj: npr. Prejeto → Odprto / Naročeno.</p>
+      <h3>Status</h3>
       <div class="status-picks">${statusBtns}</div>
     </section>
 
@@ -790,7 +770,6 @@ function renderTasks(editable: boolean): string {
   return `
     <section class="card">
       <h2>Opravila</h2>
-      <p class="muted small section-hint">Osebni opomniki vodje (npr. naročilo, klic).</p>
       ${form}
     </section>
     <section class="card">
@@ -852,23 +831,23 @@ function renderNabava(): string {
     }
   }
 
-  const subs: Array<[NabavaSub, string]> = isVodja()
+  const subs: Array<[NabavaSub, string, string]> = isVodja()
     ? [
-        ['seznam', 'Zahteve'],
-        ['nova', 'Nova'],
-        ['opravila', 'Opravila'],
+        ['seznam', '📋', 'Zahteve'],
+        ['nova', '➕', 'Nova'],
+        ['opravila', '✅', 'Opravila'],
       ]
     : [
-        ['nova', 'Nova'],
-        ['moje', 'Moje'],
-        ['seznam', 'Vse'],
-        ['opravila', 'Opravila'],
+        ['nova', '➕', 'Nova'],
+        ['moje', '👤', 'Moje'],
+        ['seznam', '📑', 'Vse'],
+        ['opravila', '✅', 'Opravila'],
       ]
 
   const subNav = `<div class="subtabs">${subs
     .map(
-      ([id, label]) =>
-        `<button class="chip ${nabavaSub === id ? 'active' : ''}" type="button" data-sub="${id}">${label}</button>`,
+      ([id, icon, label]) =>
+        `<button class="chip subchip sub-${id} ${nabavaSub === id ? 'active' : ''}" type="button" data-sub="${id}"><span class="sub-icon">${icon}</span><span>${label}</span></button>`,
     )
     .join('')}</div>`
 
@@ -881,7 +860,6 @@ function renderNabava(): string {
       `
       <section class="card">
         <h2>Nova zahteva</h2>
-        <p class="muted small section-hint">Izberi kategorijo, nujnost in opiši, kaj potrebuješ.</p>
         <form class="stack" id="req-form">
           <label class="field">Kategorija
             <select name="category" required>${cats}</select>
@@ -892,9 +870,6 @@ function renderNabava(): string {
           ${urgencyFieldHtml('normalna')}
           <label class="field">Opomba
             <textarea name="note" maxlength="500" placeholder="Količina, mere, dodatne informacije…"></textarea>
-          </label>
-          <label class="field">Poveži z zalogo (neobvezno)
-            <select name="stockItemId">${stockOptions()}</select>
           </label>
           ${qrFieldHtml('req-qr')}
           <label class="field">Fotografija (neobvezno)
@@ -915,7 +890,6 @@ function renderNabava(): string {
     )
     return (
       subNav +
-      `<p class="muted small section-hint pad-hint">Tvoje zahteve — tapni kartico za podrobnosti.</p>` +
       (mine.length === 0
         ? `<div class="card empty">Nimate še zahtev.</div>`
         : mine.map((r) => requestCard(r, 'view')).join(''))
@@ -944,8 +918,6 @@ function renderNabava(): string {
     subNav +
     `
     <section class="section-block">
-      <h2 class="section-label">Filtri</h2>
-      <p class="muted small section-hint">Status in nujnost. Nujno je na vrhu in označeno rdeče.</p>
       <div class="filters">${chips}</div>
       <div class="filters">${urgChips}</div>
     </section>
@@ -988,7 +960,6 @@ function bindNewRequestForm() {
     const title = String(fd.get('title') || '').trim()
     const note = String(fd.get('note') || '').trim()
     const urgency = (String(fd.get('urgency') || 'normalna') as Urgency) || 'normalna'
-    const stockItemId = String(fd.get('stockItemId') || '') || undefined
     const qrValue = app.querySelector<HTMLInputElement>('#req-qr')?.value.trim() || undefined
     if (!title) return
 
@@ -1011,7 +982,6 @@ function bindNewRequestForm() {
       urgency: ALL_URGENCIES.includes(urgency) ? urgency : 'normalna',
       photoDataUrl,
       qrValue,
-      stockItemId,
       status: 'odprto',
       supplierNote: '',
       history: [{ at: now, status: 'odprto', by: session.displayName }],
@@ -1021,261 +991,6 @@ function bindNewRequestForm() {
     showToast('Zahteva oddana')
     nabavaSub = isVodja() ? 'seznam' : 'moje'
     render()
-  })
-}
-
-/* ===================== Zaloge ===================== */
-function renderZaloge(): string {
-  const sorted = [...data.stock].sort((a, b) => a.name.localeCompare(b.name, 'sl'))
-  const list =
-    sorted.length === 0
-      ? `<div class="empty">Ni artiklov na zalogi.</div>`
-      : sorted
-          .map((s) => {
-            const low = s.qty <= s.minQty
-            return `
-            <article class="card ${low ? 'low-stock' : ''}" data-stock="${s.id}">
-              <div class="request-meta">
-                <span>${escapeHtml(s.category)}</span>
-                ${low ? '<span class="status zavrnjeno">Nizka zaloga</span>' : ''}
-                ${s.qrValue ? `<code class="qr-tag">${escapeHtml(s.qrValue)}</code>` : ''}
-              </div>
-              <h3 class="request-title">${escapeHtml(s.name)}</h3>
-              <div class="request-meta">
-                <span><strong>${s.qty}</strong> kos (min ${s.minQty})</span>
-                <span>${escapeHtml(s.location || '—')}</span>
-              </div>
-              ${
-                isVodja()
-                  ? `<div class="actions">
-                      <button class="btn btn-secondary" type="button" data-edit-stock="${s.id}">Uredi</button>
-                      <button class="btn btn-danger" type="button" data-del-stock="${s.id}">Izbriši</button>
-                    </div>`
-                  : ''
-              }
-            </article>`
-          })
-          .join('')
-
-  const form = isVodja()
-    ? `
-    <section class="card">
-      <h2>Nova zaloga</h2>
-      <p class="muted small section-hint">Vodi količine in min. zalogo; opozorilo, ko zmanjka.</p>
-      <form class="stack" id="stock-form">
-        <label class="field">Naziv
-          <input name="name" required maxlength="120" />
-        </label>
-        <label class="field">Kategorija
-          <input name="category" list="cat-list" required maxlength="60" />
-          <datalist id="cat-list">${CATEGORIES.map((c) => `<option value="${c}"></option>`).join('')}</datalist>
-        </label>
-        <div class="row-2">
-          <label class="field">Količina
-            <input name="qty" type="number" min="0" step="1" value="0" required />
-          </label>
-          <label class="field">Min. količina
-            <input name="minQty" type="number" min="0" step="1" value="1" required />
-          </label>
-        </div>
-        <label class="field">Lokacija
-          <input name="location" maxlength="80" placeholder="npr. Polica A3" />
-        </label>
-        ${qrFieldHtml('stock-qr')}
-        <button class="btn btn-primary btn-block" type="submit">Dodaj</button>
-      </form>
-    </section>`
-    : `<p class="muted card">Zaloge si lahko ogledate. Urejanje je za vodjo.</p>`
-
-  return form + `<section class="card"><h2>Seznam zalog</h2>${list}</section>`
-}
-
-function bindZaloge() {
-  if (isVodja()) {
-    bindQrField('stock-qr')
-    app.querySelector<HTMLFormElement>('#stock-form')?.addEventListener('submit', (e) => {
-      e.preventDefault()
-      const form = e.target as HTMLFormElement
-      const fd = new FormData(form)
-      const item: StockItem = {
-        id: uid('stock'),
-        name: String(fd.get('name') || '').trim(),
-        category: String(fd.get('category') || '').trim(),
-        qty: Number(fd.get('qty') || 0),
-        minQty: Number(fd.get('minQty') || 0),
-        location: String(fd.get('location') || '').trim(),
-        qrValue: app.querySelector<HTMLInputElement>('#stock-qr')?.value.trim() || undefined,
-        updatedAt: new Date().toISOString(),
-      }
-      if (!item.name) return
-      data.stock.push(item)
-      persist()
-      showToast('Artikel dodan')
-      render()
-    })
-
-    app.querySelectorAll<HTMLButtonElement>('[data-del-stock]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (!confirm('Izbrisati artikel?')) return
-        data.stock = data.stock.filter((s) => s.id !== btn.dataset.delStock)
-        persist()
-        render()
-      })
-    })
-
-    app.querySelectorAll<HTMLButtonElement>('[data-edit-stock]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const item = data.stock.find((s) => s.id === btn.dataset.editStock)
-        if (!item) return
-        const qty = prompt('Nova količina', String(item.qty))
-        if (qty === null) return
-        const n = Number(qty)
-        if (Number.isNaN(n) || n < 0) {
-          showToast('Neveljavna količina')
-          return
-        }
-        item.qty = n
-        item.updatedAt = new Date().toISOString()
-        persist()
-        showToast('Zaloga posodobljena')
-        render()
-      })
-    })
-  }
-}
-
-/* ===================== Okvare ===================== */
-function renderOkvare(): string {
-  const filters: Array<FaultStatus | 'vse'> = ['novo', 'v_delu', 'reseno', 'vse']
-  const chips = filters
-    .map((f) => {
-      const label = f === 'vse' ? 'Vse' : FAULT_STATUS_LABELS[f]
-      return `<button class="chip ${faultFilter === f ? 'active' : ''}" type="button" data-fault-filter="${f}">${label}</button>`
-    })
-    .join('')
-
-  const machines = MACHINES.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')
-
-  const form = `
-    <section class="card">
-      <h2>Prijava okvare</h2>
-      <p class="muted small section-hint">Hitro prijavi okvaro stroja — vodja vodi status.</p>
-      <form class="stack" id="fault-form">
-        <label class="field">Stroj
-          <select name="machine" required>${machines}</select>
-        </label>
-        <label class="field">Opis
-          <textarea name="description" required maxlength="800" placeholder="Kaj se je zgodilo?"></textarea>
-        </label>
-        <label class="field">Fotografija (neobvezno)
-          <input name="photo" type="file" accept="image/*" capture="environment" />
-        </label>
-        <div id="fault-preview"></div>
-        <button class="btn btn-primary btn-block" type="submit">Prijavi okvaro</button>
-      </form>
-    </section>`
-
-  let list = [...data.faults].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  if (faultFilter !== 'vse') list = list.filter((f) => f.status === faultFilter)
-
-  const cards =
-    list.length === 0
-      ? `<div class="card empty">Ni okvar.</div>`
-      : list
-          .map((f) => {
-            const hist = f.history
-              .map(
-                (h) => `
-              <div class="history-item">
-                <span class="status fault-${h.status}">${FAULT_STATUS_LABELS[h.status]}</span>
-                <span class="muted"> · ${formatDateTime(h.at)} · ${escapeHtml(h.by)}</span>
-              </div>`,
-              )
-              .join('')
-            const actions = isVodja()
-              ? `<div class="actions">
-                  ${f.status !== 'novo' ? `<button class="btn btn-ghost" type="button" data-fault-status="${f.id}" data-to="novo">Nazaj: Novo</button>` : ''}
-                  ${f.status !== 'v_delu' ? `<button class="btn btn-secondary" type="button" data-fault-status="${f.id}" data-to="v_delu">V delo</button>` : ''}
-                  ${f.status !== 'reseno' ? `<button class="btn btn-primary" type="button" data-fault-status="${f.id}" data-to="reseno">Rešeno</button>` : ''}
-                </div>`
-              : ''
-            return `
-              <article class="card">
-                <div class="request-meta">
-                  <span class="status fault-${f.status}">${FAULT_STATUS_LABELS[f.status]}</span>
-                  <span>${formatDateTime(f.createdAt)}</span>
-                </div>
-                <h3 class="request-title">${escapeHtml(f.machine)}</h3>
-                <p>${escapeHtml(f.description)}</p>
-                <div class="muted">${escapeHtml(f.createdBy)}</div>
-                ${f.photoDataUrl ? `<img class="photo-thumb" src="${f.photoDataUrl}" alt="Okvara" />` : ''}
-                ${actions}
-                <details style="margin-top:10px"><summary class="muted">Zgodovina</summary>${hist}</details>
-              </article>`
-          })
-          .join('')
-
-  return form + `<div class="filters">${chips}</div>` + cards
-}
-
-function bindOkvare() {
-  let photoDataUrl: string | undefined
-  const preview = app.querySelector('#fault-preview')
-  const photoInput = app.querySelector<HTMLInputElement>('#fault-form input[name="photo"]')
-  photoInput?.addEventListener('change', async () => {
-    const file = photoInput.files?.[0]
-    photoDataUrl = undefined
-    if (preview) preview.innerHTML = ''
-    if (!file || !preview) return
-    try {
-      photoDataUrl = await fileToDataUrl(file)
-      preview.innerHTML = `<img class="photo-thumb" src="${photoDataUrl}" alt="Predogled" />`
-    } catch {
-      showToast('Fotografije ni bilo mogoče obdelati')
-    }
-  })
-
-  app.querySelector('#fault-form')?.addEventListener('submit', (e) => {
-    e.preventDefault()
-    if (!session) return
-    const fd = new FormData(e.target as HTMLFormElement)
-    const now = new Date().toISOString()
-    const fault: MachineFault = {
-      id: uid('fault'),
-      machine: String(fd.get('machine') || ''),
-      description: String(fd.get('description') || '').trim(),
-      photoDataUrl,
-      status: 'novo',
-      createdAt: now,
-      createdBy: session.displayName,
-      history: [{ at: now, status: 'novo', by: session.displayName }],
-    }
-    if (!fault.description) return
-    data.faults.unshift(fault)
-    persist()
-    showToast('Okvara prijavljena')
-    render()
-  })
-
-  app.querySelectorAll<HTMLButtonElement>('[data-fault-filter]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      faultFilter = btn.dataset.faultFilter as FaultStatus | 'vse'
-      render()
-    })
-  })
-
-  app.querySelectorAll<HTMLButtonElement>('[data-fault-status]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (!session) return
-      const f = data.faults.find((x) => x.id === btn.dataset.faultStatus)
-      if (!f) return
-      const to = btn.dataset.to as FaultStatus
-      f.status = to
-      f.history.push({ at: new Date().toISOString(), status: to, by: session.displayName })
-      persist()
-      showToast(FAULT_STATUS_LABELS[to])
-      render()
-    })
   })
 }
 
@@ -1289,7 +1004,6 @@ function renderServisi(): string {
     ? `
     <section class="card">
       <h2>Nov servis</h2>
-      <p class="muted small section-hint">Načrtuj servis Okuma / MB strojev.</p>
       <form class="stack" id="service-form">
         <label class="field">Datum
           <input name="date" type="date" required />
@@ -1306,7 +1020,7 @@ function renderServisi(): string {
         <button class="btn btn-primary btn-block" type="submit">Dodaj</button>
       </form>
     </section>`
-    : `<p class="muted card">Servise ureja vodja. Spodaj je pregled.</p>`
+    : ''
 
   const sorted = [...data.services].sort((a, b) => {
     if (a.done !== b.done) return a.done ? 1 : -1
@@ -1393,44 +1107,16 @@ function renderZgodovina(): string {
   }
 
   const reqs = sortedRequests('vse')
-  const faults = [...data.faults].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const services = [...data.services].sort((a, b) => b.date.localeCompare(a.date))
 
   return `
     <section class="card">
       <h2>Zgodovina nabave</h2>
-      <p class="muted">${reqs.length} zahtev · tapni kartico za podrobnosti / status</p>
+      <p class="muted">${reqs.length} zahtev</p>
     </section>
     ${exportBar('all')}
-    <div class="export-bar card">
-      <div>
-        <h3 class="export-title">Samo nabavljeno</h3>
-        <p class="muted small">Status Prejeto — kaj je že bilo naročeno/prejeto.</p>
-      </div>
-      <div class="actions">
-        <button class="btn btn-secondary" type="button" data-export="excel" data-scope="history">Izvoz Excel</button>
-        <button class="btn btn-secondary" type="button" data-export="word" data-scope="history">Izvoz Word</button>
-      </div>
-    </div>
+    ${exportBar('history')}
     ${reqs.length === 0 ? '<div class="card empty">Ni zahtev.</div>' : reqs.map((r) => requestCard(r, 'view')).join('')}
-    <section class="card"><h2>Okvare — arhiv</h2></section>
-    ${
-      faults.length === 0
-        ? '<div class="card empty">Ni okvar.</div>'
-        : faults
-            .map(
-              (f) => `
-        <article class="card">
-          <div class="request-meta">
-            <span class="status fault-${f.status}">${FAULT_STATUS_LABELS[f.status]}</span>
-            <span>${formatDateTime(f.createdAt)}</span>
-          </div>
-          <h3 class="request-title">${escapeHtml(f.machine)}</h3>
-          <p>${escapeHtml(f.description)}</p>
-        </article>`,
-            )
-            .join('')
-    }
     <section class="card"><h2>Servisi</h2></section>
     ${
       services.length === 0
@@ -1455,8 +1141,6 @@ function renderZgodovina(): string {
 function renderApp() {
   let content = ''
   if (tab === 'nabava') content = renderNabava()
-  else if (tab === 'zaloge') content = renderZaloge()
-  else if (tab === 'okvare') content = renderOkvare()
   else if (tab === 'servisi') content = renderServisi()
   else content = renderZgodovina()
 
@@ -1493,9 +1177,7 @@ function renderApp() {
         })
       })
     }
-  } else if (tab === 'zaloge') bindZaloge()
-  else if (tab === 'okvare') bindOkvare()
-  else if (tab === 'servisi') bindServisi()
+  } else if (tab === 'servisi') bindServisi()
   else if (tab === 'zgodovina') {
     if (detailRequestId) {
       const req = data.requests.find((r) => r.id === detailRequestId)

@@ -96,22 +96,22 @@ code {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
   margin-bottom: 12px;
   position: sticky;
   top: 8px;
   z-index: 5;
 }
 .tab {
-  min-height: var(--tap);
+  min-height: 58px;
   border-radius: 14px;
   background: var(--surface);
   border: 1px solid var(--line);
   font-weight: 700;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   box-shadow: var(--shadow);
-  padding: 6px 2px;
+  padding: 8px 4px;
   line-height: 1.15;
   display: flex;
   flex-direction: column;
@@ -119,19 +119,18 @@ code {
   justify-content: center;
   gap: 2px;
 }
+.tab-icon { font-size: 1.15rem; line-height: 1; }
 .tab-label { font-weight: 800; }
 .tab-hint {
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 600;
   opacity: 0.72;
   letter-spacing: 0.01em;
 }
-.tab.active {
-  background: var(--brand);
-  color: #fff;
-  border-color: var(--brand);
-}
-.tab.active .tab-hint { opacity: 0.85; }
+.tab.tab-nabava.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.tab.tab-servisi.active { background: #b45309; border-color: #b45309; color: #fff; }
+.tab.tab-zgodovina.active { background: #5b21b6; border-color: #5b21b6; color: #fff; }
+.tab.active .tab-hint { opacity: 0.9; }
 
 .subtabs, .filters {
   display: flex;
@@ -277,9 +276,6 @@ label.field {
 .status.naroceno { background: var(--warn-soft); color: var(--warn); }
 .status.prejeto { background: var(--ok-soft); color: var(--ok); }
 .status.zavrnjeno { background: var(--danger-soft); color: var(--danger); }
-.status.fault-novo { background: var(--info-soft); color: var(--info); }
-.status.fault-v_delu { background: var(--warn-soft); color: var(--warn); }
-.status.fault-reseno { background: var(--ok-soft); color: var(--ok); }
 
 .urgency {
   display: inline-flex;
@@ -487,7 +483,7 @@ label.field {
 }
 
 .chip {
-  min-height: 44px;
+  min-height: 48px;
   padding: 0 16px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -501,6 +497,43 @@ label.field {
   color: #fff;
   border-color: var(--brand);
 }
+.subchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 18px;
+  border-width: 2px;
+}
+.sub-icon { font-size: 1.15rem; line-height: 1; }
+.sub-seznam { border-color: #93c5fd; color: #1e40af; background: #eff6ff; }
+.sub-seznam.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.sub-nova { border-color: #86efac; color: #047857; background: #ecfdf5; }
+.sub-nova.active { background: #047857; border-color: #047857; color: #fff; }
+.sub-opravila { border-color: #fcd34d; color: #b45309; background: #fffbeb; }
+.sub-opravila.active { background: #b45309; border-color: #b45309; color: #fff; }
+.sub-moje { border-color: #c4b5fd; color: #5b21b6; background: #f5f3ff; }
+.sub-moje.active { background: #5b21b6; border-color: #5b21b6; color: #fff; }
+.btn-export-excel {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 14px;
+  font-weight: 800;
+}
+.btn-export-word {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 14px;
+  font-weight: 800;
+}
+.export-actions { margin-top: 0; }
+.status-pick { min-height: 52px; }
 .chip.u-visoka { border-color: #fda4af; color: var(--urgent); }
 .chip.u-visoka.active {
   background: var(--urgent);
@@ -535,10 +568,6 @@ label.field {
 }
 .qr-tag { font-size: 0.78rem; }
 
-.low-stock {
-  border-color: #f0b4b4;
-  background: linear-gradient(180deg, #fff8f8, #fff);
-}
 .done-soft { opacity: 0.85; }
 .check-row {
   display: inline-flex;
@@ -550,9 +579,9 @@ label.field {
 .check-row input { width: 22px; height: 22px; accent-color: var(--brand); }
 
 @media (max-width: 420px) {
-  .tabs { gap: 4px; }
-  .tab { font-size: 0.68rem; min-height: 52px; }
-  .tab-hint { font-size: 0.55rem; }
+  .tabs { gap: 6px; }
+  .tab { font-size: 0.78rem; min-height: 56px; }
+  .tab-hint { font-size: 0.6rem; }
   .row-2 { grid-template-columns: 1fr; }
   .status-picks { grid-template-columns: 1fr 1fr; }
 }
@@ -560,8 +589,8 @@ label.field {
 @media (min-width: 640px) {
   #app { padding: 20px 20px 40px; }
   .app-header h1 { font-size: 1.4rem; }
-  .tab { font-size: 0.9rem; }
-  .tab-hint { font-size: 0.7rem; }
+  .tab { font-size: 0.95rem; }
+  .tab-hint { font-size: 0.72rem; }
 }
 
 .user-pick-list {
