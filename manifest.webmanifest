@@ -2,15 +2,15 @@
   "name": "Nabava — Orodjarna",
   "short_name": "Orodjarna",
   "description": "Nabava in servisi orodjarne",
-  "start_url": "/nabava-orodjarna/",
-  "scope": "/nabava-orodjarna/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#e9eef3",
   "theme_color": "#2a5f8f",
   "lang": "sl",
   "icons": [
     {
-      "src": "/nabava-orodjarna/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

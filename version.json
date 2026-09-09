@@ -1,0 +1,5 @@
+{
+  "version": "1.1.0",
+  "builtAt": "2026-09-09T13:25:18.260Z",
+  "notes": "LAN deljeni način: strežnik na :8787, skupni db.json, preverjanje posodobitev."
+}
