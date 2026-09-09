@@ -1,4 +1,4 @@
-import type { AppData, Session } from './types.ts'
+import type { AppData, Role, Session, UserAccount } from './types.ts'
 
 const DATA_KEY = 'nabava-orodjarna-data-v2'
 const LEGACY_DATA_KEY = 'nabava-orodjarna-data-v1'
@@ -16,10 +16,27 @@ export const emptyData = (): AppData => ({
   users: [],
 })
 
+function normalizeUser(raw: unknown): UserAccount | null {
+  if (!raw || typeof raw !== 'object') return null
+  const u = raw as Record<string, unknown>
+  if (typeof u.id !== 'string' || typeof u.name !== 'string') return null
+  const role: Role = u.role === 'vodja' ? 'vodja' : 'delavec'
+  return {
+    id: u.id,
+    name: u.name,
+    role,
+    workstationId: typeof u.workstationId === 'string' ? u.workstationId : undefined,
+    createdAt: typeof u.createdAt === 'string' ? u.createdAt : new Date().toISOString(),
+  }
+}
+
 function migrateLegacy(raw: unknown): AppData {
   const base = emptyData()
   if (!raw || typeof raw !== 'object') return base
   const parsed = raw as Partial<AppData> & { requests?: unknown[]; tasks?: unknown[] }
+  const users = Array.isArray(parsed.users)
+    ? parsed.users.map(normalizeUser).filter((u): u is UserAccount => !!u)
+    : []
   return {
     ...base,
     requests: Array.isArray(parsed.requests) ? (parsed.requests as AppData['requests']) : [],
@@ -28,7 +45,7 @@ function migrateLegacy(raw: unknown): AppData {
     faults: Array.isArray(parsed.faults) ? parsed.faults : [],
     services: Array.isArray(parsed.services) ? parsed.services : [],
     suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : [],
-    users: Array.isArray(parsed.users) ? parsed.users : [],
+    users,
     lastUserId: typeof parsed.lastUserId === 'string' ? parsed.lastUserId : undefined,
   }
 }

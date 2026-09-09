@@ -9,7 +9,7 @@ import {
   findSlot,
   findWorkstation,
 } from './data.ts'
-import { createUser, findUserByName, verifyPin } from './auth.ts'
+import { createUser, findUserByName } from './auth.ts'
 import { fileToDataUrl } from './image.ts'
 import {
   decodeQrFromFile,
@@ -54,6 +54,7 @@ let faultFilter: FaultStatus | 'vse' = 'novo'
 let toastTimer: number | undefined
 let cameraStream: MediaStream | null = null
 let scanLoop = 0
+let authView: 'pick' | 'register' = 'pick'
 
 function persist() {
   saveData(data)
@@ -80,6 +81,7 @@ function logout() {
   stopScan()
   session = null
   saveSession(null)
+  authView = 'pick'
   tab = 'nabava'
   nabavaSub = 'seznam'
   render()
@@ -192,55 +194,40 @@ function shell(content: string) {
 }
 
 /* ===================== Auth ===================== */
+function loginAsUser(userId: string) {
+  const user = data.users.find((u) => u.id === userId)
+  if (!user) return
+  const ws = user.workstationId ? findWorkstation(user.workstationId) : undefined
+  const slot = ws?.slots[0]
+  setSession({
+    userId: user.id,
+    role: user.role,
+    displayName: user.name,
+    workstationId: user.workstationId,
+    slotId: slot?.id,
+  })
+  showToast(`Pozdravljeni, ${user.name}`)
+}
+
 function renderAuth() {
   const last = data.lastUserId ? data.users.find((u) => u.id === data.lastUserId) : undefined
-  const userOptions = data.users
-    .map(
-      (u) =>
-        `<option value="${escapeHtml(u.id)}" ${last?.id === u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.role === 'vodja' ? 'vodja' : 'delavec'})</option>`,
-    )
-    .join('')
-
   const wsOpts = WORKSTATIONS.map(
     (w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`,
   ).join('')
 
-  app.innerHTML = `
+  if (authView === 'register') {
+    app.innerHTML = `
     <div class="login-hero">
       <div class="logo">NO</div>
       <h1>Nabava orodjarne</h1>
-      <p class="muted">Lokalni računi (PIN) — podatki ostanejo v tem brskalniku. Sinhronizacija med napravami zahteva strežnik (kasneje).</p>
+      <p class="muted">Lokalni računi — podatki ostanejo v tem brskalniku. Sinhronizacija med napravami zahteva strežnik (kasneje).</p>
     </div>
-
-    <section class="card stack">
-      <h2>Prijava</h2>
-      ${
-        data.users.length === 0
-          ? `<p class="muted">Še ni uporabnikov — najprej se registrirajte.</p>`
-          : `
-        <form class="stack" id="login-form">
-          <label class="field">Uporabnik
-            <select name="userId" required>
-              <option value="">— izberi —</option>
-              ${userOptions}
-            </select>
-          </label>
-          <label class="field">PIN / geslo
-            <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required minlength="4" maxlength="32" />
-          </label>
-          <button class="btn btn-primary btn-block" type="submit">Prijava</button>
-        </form>`
-      }
-    </section>
 
     <section class="card stack">
       <h2>Registracija</h2>
       <form class="stack" id="reg-form">
         <label class="field">Ime
           <input name="name" required maxlength="60" placeholder="npr. Janez Novak" />
-        </label>
-        <label class="field">PIN / geslo (min. 4)
-          <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" maxlength="32" />
         </label>
         <label class="field">Vloga
           <select name="role" id="reg-role">
@@ -251,65 +238,99 @@ function renderAuth() {
         <label class="field" id="reg-ws-wrap">Delovna postaja
           <select name="workstationId">${wsOpts}</select>
         </label>
-        <button class="btn btn-secondary btn-block" type="submit">Ustvari račun</button>
+        <button class="btn btn-primary btn-block" type="submit">Ustvari račun</button>
+        <button class="btn btn-ghost btn-block" type="button" id="reg-back">Nazaj na izbiro</button>
       </form>
     </section>
   `
 
-  const roleSelect = app.querySelector<HTMLSelectElement>('#reg-role')
-  const wsWrap = app.querySelector<HTMLElement>('#reg-ws-wrap')
-  const syncWs = () => {
-    if (wsWrap) wsWrap.style.display = roleSelect?.value === 'vodja' ? 'none' : ''
-  }
-  roleSelect?.addEventListener('change', syncWs)
-  syncWs()
-
-  app.querySelector<HTMLFormElement>('#login-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const fd = new FormData(e.target as HTMLFormElement)
-    const userId = String(fd.get('userId') || '')
-    const pin = String(fd.get('pin') || '')
-    const user = data.users.find((u) => u.id === userId)
-    if (!user) return
-    if (!(await verifyPin(pin, user.pinHash))) {
-      showToast('Napačen PIN')
-      return
+    const roleSelect = app.querySelector<HTMLSelectElement>('#reg-role')
+    const wsWrap = app.querySelector<HTMLElement>('#reg-ws-wrap')
+    const syncWs = () => {
+      if (wsWrap) wsWrap.style.display = roleSelect?.value === 'vodja' ? 'none' : ''
     }
-    const ws = user.workstationId ? findWorkstation(user.workstationId) : undefined
-    const slot = ws?.slots[0]
-    setSession({
-      userId: user.id,
-      role: user.role,
-      displayName: user.name,
-      workstationId: user.workstationId,
-      slotId: slot?.id,
+    roleSelect?.addEventListener('change', syncWs)
+    syncWs()
+
+    app.querySelector('#reg-back')?.addEventListener('click', () => {
+      authView = 'pick'
+      render()
     })
-    showToast(`Pozdravljeni, ${user.name}`)
+
+    app.querySelector<HTMLFormElement>('#reg-form')?.addEventListener('submit', (e) => {
+      e.preventDefault()
+      const fd = new FormData(e.target as HTMLFormElement)
+      const name = String(fd.get('name') || '').trim()
+      const role = String(fd.get('role') || 'delavec') as 'vodja' | 'delavec'
+      const workstationId = role === 'delavec' ? String(fd.get('workstationId') || '') : undefined
+      if (!name) return
+      if (findUserByName(data.users, name)) {
+        showToast('Uporabnik s tem imenom že obstaja')
+        return
+      }
+      const user = createUser({ name, role, workstationId })
+      data.users.push(user)
+      persist()
+      authView = 'pick'
+      const ws = workstationId ? findWorkstation(workstationId) : undefined
+      setSession({
+        userId: user.id,
+        role: user.role,
+        displayName: user.name,
+        workstationId,
+        slotId: ws?.slots[0]?.id,
+      })
+      showToast('Račun ustvarjen')
+    })
+    return
+  }
+
+  const sortedUsers = [...data.users].sort((a, b) => {
+    if (last && a.id === last.id) return -1
+    if (last && b.id === last.id) return 1
+    return a.name.localeCompare(b.name, 'sl')
   })
 
-  app.querySelector<HTMLFormElement>('#reg-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const fd = new FormData(e.target as HTMLFormElement)
-    const name = String(fd.get('name') || '').trim()
-    const pin = String(fd.get('pin') || '')
-    const role = String(fd.get('role') || 'delavec') as 'vodja' | 'delavec'
-    const workstationId = role === 'delavec' ? String(fd.get('workstationId') || '') : undefined
-    if (findUserByName(data.users, name)) {
-      showToast('Uporabnik s tem imenom že obstaja')
-      return
-    }
-    const user = await createUser({ name, pin, role, workstationId })
-    data.users.push(user)
-    persist()
-    const ws = workstationId ? findWorkstation(workstationId) : undefined
-    setSession({
-      userId: user.id,
-      role: user.role,
-      displayName: user.name,
-      workstationId,
-      slotId: ws?.slots[0]?.id,
-    })
-    showToast('Račun ustvarjen')
+  const userList =
+    sortedUsers.length === 0
+      ? `<p class="muted">Še ni uporabnikov — najprej se registrirajte.</p>`
+      : `<div class="user-pick-list">
+        ${sortedUsers
+          .map((u) => {
+            const isLast = last?.id === u.id
+            const roleLabel = u.role === 'vodja' ? 'Vodja' : 'Delavec'
+            return `<button class="user-pick ${isLast ? 'last' : ''}" type="button" data-user-id="${escapeHtml(u.id)}">
+              <span class="user-pick-name">${escapeHtml(u.name)}</span>
+              <span class="user-pick-meta">${roleLabel}${isLast ? ' · zadnji' : ''}</span>
+            </button>`
+          })
+          .join('')}
+      </div>`
+
+  app.innerHTML = `
+    <div class="login-hero">
+      <div class="logo">NO</div>
+      <h1>Nabava orodjarne</h1>
+      <p class="muted">Izberi uporabnika — brez PIN-a. Podatki ostanejo v tem brskalniku.</p>
+    </div>
+
+    <section class="card stack">
+      <h2>Kdo si?</h2>
+      ${userList}
+    </section>
+
+    <div class="auth-bottom">
+      <button class="btn btn-secondary btn-block" type="button" id="open-register">Registracija</button>
+    </div>
+  `
+
+  app.querySelectorAll<HTMLButtonElement>('[data-user-id]').forEach((btn) => {
+    btn.addEventListener('click', () => loginAsUser(btn.dataset.userId || ''))
+  })
+
+  app.querySelector('#open-register')?.addEventListener('click', () => {
+    authView = 'register'
+    render()
   })
 }
 

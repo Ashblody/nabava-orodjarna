@@ -29,7 +29,6 @@ export interface Workstation {
 export interface UserAccount {
   id: string
   name: string
-  pinHash: string
   role: Role
   workstationId?: string
   createdAt: string
