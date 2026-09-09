@@ -1,12 +1,12 @@
 {
   "name": "Nabava — Orodjarna",
   "short_name": "Orodjarna",
-  "description": "Nabava, zaloge, okvare in servisi orodjarne",
+  "description": "Nabava in servisi orodjarne",
   "start_url": "/nabava-orodjarna/",
   "scope": "/nabava-orodjarna/",
   "display": "standalone",
-  "background_color": "#f3f6f4",
-  "theme_color": "#1a5f4a",
+  "background_color": "#e9eef3",
+  "theme_color": "#2a5f8f",
   "lang": "sl",
   "icons": [
     {

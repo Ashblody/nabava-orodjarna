@@ -49,7 +49,7 @@ var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=
         <li><strong>Servisi</strong> — načrtovanje servisov Okuma.</li>
       </ol>
       <p class="muted small tip-line">Podatki ostanejo v tem brskalniku (ni sinhronizacije med telefoni).</p>
-    </section>`:`<button class="howto-link" type="button" data-action="howto-open">Kako deluje?</button>`}function Ce(e){let t=[[`nabava`,`📦`,`Nabava`,`Zahteve`],[`servisi`,`🔧`,`Servisi`,`Okuma`],[`zgodovina`,`🗂️`,`Zgodovina`,`Arhiv`]].map(([e,t,n,r])=>`<button class="tab tab-${e} ${z===e?`active`:``}" type="button" data-tab="${e}">
+    </section>`:`<button class="howto-link" type="button" data-action="howto-open">Kako deluje?</button>`}function Ce(e){let t=[[`nabava`,`▣`,`Nabava`,`Zahteve`],[`servisi`,`⚙`,`Servisi`,`Okuma`],[`zgodovina`,`▤`,`Zgodovina`,`Arhiv`]].map(([e,t,n,r])=>`<button class="tab tab-${e} ${z===e?`active`:``}" type="button" data-tab="${e}">
           <span class="tab-icon">${t}</span>
           <span class="tab-label">${n}</span>
           <span class="tab-hint">${r}</span>
@@ -119,7 +119,7 @@ var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=
     <label class="field">QR koda (neobvezno)
       <div class="qr-row">
         <input type="text" id="${e}" value="${M(t)}" placeholder="Vnesi ali skeniraj QR" />
-        <button class="btn btn-secondary" type="button" data-open-scan="${e}">📷</button>
+        <button class="btn btn-secondary" type="button" data-open-scan="${e}" title="Skeniraj QR" aria-label="Skeniraj QR">⬚</button>
       </div>
     </label>
     <div class="scan-panel hidden" data-scan-panel="${e}">
@@ -238,7 +238,7 @@ var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=
     <section class="card">
       <h3>Seznam</h3>
       ${r}
-    </section>`}function ze(e){if(e){let e=I.querySelector(`#task-form`);e?.addEventListener(`submit`,t=>{t.preventDefault();let n=new FormData(e),r=String(n.get(`text`)||``).trim(),i=String(n.get(`due`)||``);if(!r||!i||!R)return;let a={id:A(`task`),text:r,dueDate:i,done:!1,createdAt:new Date().toISOString(),createdBy:R.displayName};L.tasks.push(a),q(),J(`Opravilo dodano`),Z()}),I.querySelectorAll(`[data-del-task]`).forEach(e=>{e.addEventListener(`click`,()=>{L.tasks=L.tasks.filter(t=>t.id!==e.dataset.delTask),q(),J(`Opravilo izbrisano`),Z()})})}I.querySelectorAll(`[data-toggle-task]`).forEach(t=>{t.addEventListener(`change`,()=>{if(!e)return;let n=L.tasks.find(e=>e.id===t.dataset.toggleTask);n&&(n.done=t.checked,q(),Z())})})}function Be(){if(U){let e=L.requests.find(e=>e.id===U);if(!e)U=null;else return Fe(e)}let e=`<div class="subtabs">${(X()?[[`seznam`,`📋`,`Zahteve`],[`nova`,`➕`,`Nova`],[`opravila`,`✅`,`Opravila`]]:[[`nova`,`➕`,`Nova`],[`moje`,`👤`,`Moje`],[`seznam`,`📑`,`Vse`],[`opravila`,`✅`,`Opravila`]]).map(([e,t,n])=>`<button class="chip subchip sub-${e} ${B===e?`active`:``}" type="button" data-sub="${e}"><span class="sub-icon">${t}</span><span>${n}</span></button>`).join(``)}</div>`;if(B===`opravila`)return e+Re(X());if(B===`nova`)return e+`
+    </section>`}function ze(e){if(e){let e=I.querySelector(`#task-form`);e?.addEventListener(`submit`,t=>{t.preventDefault();let n=new FormData(e),r=String(n.get(`text`)||``).trim(),i=String(n.get(`due`)||``);if(!r||!i||!R)return;let a={id:A(`task`),text:r,dueDate:i,done:!1,createdAt:new Date().toISOString(),createdBy:R.displayName};L.tasks.push(a),q(),J(`Opravilo dodano`),Z()}),I.querySelectorAll(`[data-del-task]`).forEach(e=>{e.addEventListener(`click`,()=>{L.tasks=L.tasks.filter(t=>t.id!==e.dataset.delTask),q(),J(`Opravilo izbrisano`),Z()})})}I.querySelectorAll(`[data-toggle-task]`).forEach(t=>{t.addEventListener(`change`,()=>{if(!e)return;let n=L.tasks.find(e=>e.id===t.dataset.toggleTask);n&&(n.done=t.checked,q(),Z())})})}function Be(){if(U){let e=L.requests.find(e=>e.id===U);if(!e)U=null;else return Fe(e)}let e=`<div class="subtabs">${(X()?[[`seznam`,`☰`,`Zahteve`],[`nova`,`+`,`Nova`],[`opravila`,`☑`,`Opravila`]]:[[`nova`,`+`,`Nova`],[`moje`,`▣`,`Moje`],[`seznam`,`☰`,`Vse`],[`opravila`,`☑`,`Opravila`]]).map(([e,t,n])=>`<button class="chip subchip sub-${e} ${B===e?`active`:``}" type="button" data-sub="${e}"><span class="sub-icon">${t}</span><span>${n}</span></button>`).join(``)}</div>`;if(B===`opravila`)return e+Re(X());if(B===`nova`)return e+`
       <section class="card">
         <h2>Nova zahteva</h2>
         <form class="stack" id="req-form">
