@@ -182,9 +182,9 @@ function howtoPanel(): string {
 
 function shell(content: string) {
   const tabs: Array<[MainTab, string, string, string]> = [
-    ['nabava', '📦', 'Nabava', 'Zahteve'],
-    ['servisi', '🔧', 'Servisi', 'Okuma'],
-    ['zgodovina', '🗂️', 'Zgodovina', 'Arhiv'],
+    ['nabava', '▣', 'Nabava', 'Zahteve'],
+    ['servisi', '⚙', 'Servisi', 'Okuma'],
+    ['zgodovina', '▤', 'Zgodovina', 'Arhiv'],
   ]
   const tabsHtml = tabs
     .map(
@@ -383,7 +383,7 @@ function qrFieldHtml(id: string, value = '') {
     <label class="field">QR koda (neobvezno)
       <div class="qr-row">
         <input type="text" id="${id}" value="${escapeHtml(value)}" placeholder="Vnesi ali skeniraj QR" />
-        <button class="btn btn-secondary" type="button" data-open-scan="${id}">📷</button>
+        <button class="btn btn-secondary" type="button" data-open-scan="${id}" title="Skeniraj QR" aria-label="Skeniraj QR">⬚</button>
       </div>
     </label>
     <div class="scan-panel hidden" data-scan-panel="${id}">
@@ -833,15 +833,15 @@ function renderNabava(): string {
 
   const subs: Array<[NabavaSub, string, string]> = isVodja()
     ? [
-        ['seznam', '📋', 'Zahteve'],
-        ['nova', '➕', 'Nova'],
-        ['opravila', '✅', 'Opravila'],
+        ['seznam', '☰', 'Zahteve'],
+        ['nova', '+', 'Nova'],
+        ['opravila', '☑', 'Opravila'],
       ]
     : [
-        ['nova', '➕', 'Nova'],
-        ['moje', '👤', 'Moje'],
-        ['seznam', '📑', 'Vse'],
-        ['opravila', '✅', 'Opravila'],
+        ['nova', '+', 'Nova'],
+        ['moje', '▣', 'Moje'],
+        ['seznam', '☰', 'Vse'],
+        ['opravila', '☑', 'Opravila'],
       ]
 
   const subNav = `<div class="subtabs">${subs
