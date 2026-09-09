@@ -21,15 +21,18 @@ import {
   stopCamera,
 } from './qr.ts'
 import {
+  emptyData,
   escapeHtml,
   formatDate,
   formatDateTime,
-  loadData,
+  initData,
+  isServerMode,
   loadSession,
   saveData,
   saveSession,
   uid,
 } from './storage.ts'
+import { APP_VERSION, fetchRemoteVersion, isNewerVersion } from './version.ts'
 import type {
   AppData,
   Category,
@@ -48,7 +51,7 @@ type NabavaSub = 'seznam' | 'nova' | 'opravila' | 'moje'
 const HOWTO_KEY = 'nabava-orodjarna-howto-dismissed'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
-let data: AppData = loadData()
+let data: AppData = emptyData()
 let session: Session | null = loadSession()
 let tab: MainTab = 'nabava'
 let nabavaSub: NabavaSub = 'seznam'
@@ -176,7 +179,7 @@ function howtoPanel(): string {
         <li><strong>Izvoz</strong> — Excel (CSV) ali Word s seznama / zgodovine.</li>
         <li><strong>Servisi</strong> — načrtovanje servisov Okuma.</li>
       </ol>
-      <p class="muted small tip-line">Podatki ostanejo v tem brskalniku (ni sinhronizacije med telefoni).</p>
+      <p class="muted small tip-line">${isServerMode() ? 'Podatki so na LAN strežniku (deljeni med napravami v omrežju).' : 'Podatki ostanejo v tem brskalniku (ni sinhronizacije med telefoni).'}</p>
     </section>`
 }
 
@@ -197,13 +200,15 @@ function shell(content: string) {
     )
     .join('')
 
+  const modeLabel = isServerMode() ? 'LAN deljeno' : 'lokalno'
   app.innerHTML = `
     <header class="app-header">
       <div>
         <h1>Orodjarna</h1>
-        <div class="sub">${escapeHtml(session!.displayName)} · lokalno</div>
+        <div class="sub">${escapeHtml(session!.displayName)} · ${modeLabel} · v${APP_VERSION}</div>
       </div>
       <div class="row">
+        <button class="btn btn-ghost btn-sm" type="button" data-action="check-update" title="Preveri posodobitev">Preveri posodobitev</button>
         <span class="badge">${session!.role === 'vodja' ? 'Vodja' : 'Delavec'}</span>
         <button class="btn btn-ghost" type="button" data-action="logout">Odjava</button>
       </div>
@@ -213,6 +218,9 @@ function shell(content: string) {
     <main>${content}</main>
   `
   app.querySelector('[data-action="logout"]')?.addEventListener('click', logout)
+  app.querySelector('[data-action="check-update"]')?.addEventListener('click', () => {
+    void checkForUpdate(true)
+  })
   app.querySelector('[data-action="howto-dismiss"]')?.addEventListener('click', () => {
     howtoOpen = false
     localStorage.setItem(HOWTO_KEY, '1')
@@ -1189,4 +1197,33 @@ function renderApp() {
   }
 }
 
-render()
+
+async function checkForUpdate(manual = false) {
+  const remote = await fetchRemoteVersion()
+  if (!remote) {
+    if (manual) showToast('Posodobitve ni mogoče preveriti')
+    return
+  }
+  if (isNewerVersion(remote.version, APP_VERSION)) {
+    const notes = remote.notes ? `\n\n${remote.notes}` : ''
+    const ok = window.confirm(
+      `Na voljo je nova različica ${remote.version} (trenutna: ${APP_VERSION}).${notes}\n\nOsveži aplikacijo?`,
+    )
+    if (ok) location.reload()
+  } else if (manual) {
+    showToast(`Že imaš najnovejšo različico (${APP_VERSION})`)
+  }
+}
+
+async function bootstrap() {
+  app.innerHTML = `<div class="login-hero"><div class="logo">NO</div><p class="muted">Nalagam…</p></div>`
+  try {
+    data = await initData()
+  } catch {
+    data = emptyData()
+  }
+  render()
+  void checkForUpdate(false)
+}
+
+bootstrap()

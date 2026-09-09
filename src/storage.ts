@@ -5,6 +5,10 @@ const DATA_KEY = 'nabava-orodjarna-data-v2'
 const LEGACY_DATA_KEY = 'nabava-orodjarna-data-v1'
 const SESSION_KEY = 'nabava-orodjarna-session-v2'
 const LEGACY_SESSION_KEY = 'nabava-orodjarna-session-v1'
+const MIGRATED_KEY = 'nabava-orodjarna-migrated-to-server'
+
+let serverMode = false
+let saveChain: Promise<void> = Promise.resolve()
 
 export const emptyData = (): AppData => ({
   version: 2,
@@ -16,6 +20,10 @@ export const emptyData = (): AppData => ({
   suppliers: [],
   users: [],
 })
+
+export function isServerMode(): boolean {
+  return serverMode
+}
 
 function normalizeUser(raw: unknown): UserAccount | null {
   if (!raw || typeof raw !== 'object') return null
@@ -78,7 +86,17 @@ function migrateLegacy(raw: unknown): AppData {
   }
 }
 
-export function loadData(): AppData {
+function isEffectivelyEmpty(data: AppData): boolean {
+  return (
+    data.users.length === 0 &&
+    data.requests.length === 0 &&
+    data.tasks.length === 0 &&
+    data.services.length === 0 &&
+    data.suppliers.length === 0
+  )
+}
+
+function loadLocalData(): AppData {
   try {
     const raw = localStorage.getItem(DATA_KEY) ?? localStorage.getItem(LEGACY_DATA_KEY)
     if (!raw) return emptyData()
@@ -92,9 +110,65 @@ export function loadData(): AppData {
   }
 }
 
-export function saveData(data: AppData): void {
+function saveLocalData(data: AppData): void {
   data.version = 2
   localStorage.setItem(DATA_KEY, JSON.stringify(data))
+}
+
+async function putServerData(data: AppData): Promise<void> {
+  const res = await fetch('/api/data', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(`Shranjevanje ni uspelo (${res.status})`)
+}
+
+/** Probe LAN API; migrate local → server once if server empty. */
+export async function initData(): Promise<AppData> {
+  try {
+    const res = await fetch('/api/data', { cache: 'no-store' })
+    if (!res.ok) throw new Error('no api')
+    serverMode = true
+    let serverRaw: unknown = null
+    try {
+      serverRaw = await res.json()
+    } catch {
+      serverRaw = null
+    }
+    const serverData = migrateLegacy(serverRaw)
+    const local = loadLocalData()
+    if (isEffectivelyEmpty(serverData) && !isEffectivelyEmpty(local)) {
+      const already = localStorage.getItem(MIGRATED_KEY)
+      if (!already) {
+        await putServerData(local)
+        localStorage.setItem(MIGRATED_KEY, new Date().toISOString())
+        return local
+      }
+    }
+    return serverData
+  } catch {
+    serverMode = false
+    return loadLocalData()
+  }
+}
+
+/** Sync load from localStorage only (legacy / before init). Prefer initData(). */
+export function loadData(): AppData {
+  return loadLocalData()
+}
+
+export function saveData(data: AppData): void {
+  data.version = 2
+  if (serverMode) {
+    saveChain = saveChain
+      .then(() => putServerData(data))
+      .catch((err) => {
+        console.error('LAN save failed', err)
+      })
+    return
+  }
+  saveLocalData(data)
 }
 
 export function loadSession(): Session | null {

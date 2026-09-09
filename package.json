@@ -1,12 +1,14 @@
 {
   "name": "nabava-orodjarna",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build:lan": "tsc && vite build --base /",
+    "preview": "vite preview",
+    "server": "node server/index.js"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

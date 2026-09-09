@@ -9,8 +9,18 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-lan
 dist-ssr
 *.local
+
+# LAN runtime data & portable Node (never commit binaries)
+server/data/db.json
+server/data/db.json.tmp
+data/
+runtime/
+deploy/lan/runtime/
+deploy/lan/data/db.json
+deploy/lan/dist/
 
 # Editor directories and files
 .vscode/*
