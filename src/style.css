@@ -141,6 +141,21 @@ code {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Separate Zahteve subtabs from Odprto/status filters below */
+.subtabs {
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Smaller filter chips — secondary to subtab actions */
+.filters .chip {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
