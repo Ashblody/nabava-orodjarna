@@ -1,26 +1,26 @@
 # Nabava — Orodjarna
 
 Notranji prototip aplikacije za nabavo v orodjarni (Andrej Habjan).
-Podatki: localStorage, brez streznika.
+Podatki se shranjujejo lokalno v brskalniku (localStorage) - ni streznika in ni pravih gesel.
 
 ## Odpiranje lokalno
 
 Zahteve: Bun ali Node.js.
 
-cd nabava-orodjarna
-bun install
-bun run dev
+    cd nabava-orodjarna
+    bun install
+    bun run dev
 
-Odpri URL ki ga izpise Vite (npr. http://localhost:5173/nabava-orodjarna/).
+Odpri URL (npr. http://localhost:5173/nabava-orodjarna/).
 
-bun run build && bun run preview
+    bun run build
+    bun run preview
 
 ## GitHub Pages
 
 https://ashblody.github.io/nabava-orodjarna/
 
-base v vite.config.ts: /nabava-orodjarna/
-Pages: veja gh-pages (mapa /) ali main.
+base: /nabava-orodjarna/ ; veja gh-pages.
 
 ## Vloge
 
