@@ -1,4 +1,4 @@
-import type { Category, Workstation } from './types.ts'
+import type { Category, RequestStatus, Urgency, Workstation } from './types.ts'
 
 export const WORKSTATIONS: Workstation[] = [
   {
@@ -63,12 +63,28 @@ export const OKUMA_MACHINES = [
   'MB-56VA',
 ] as const
 
-export const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<RequestStatus, string> = {
   odprto: 'Odprto',
   naroceno: 'Naročeno',
   prejeto: 'Prejeto',
   zavrnjeno: 'Zavrnjeno',
 }
+
+export const ALL_STATUSES: RequestStatus[] = ['odprto', 'naroceno', 'prejeto', 'zavrnjeno']
+
+export const URGENCY_LABELS: Record<Urgency, string> = {
+  nizka: 'Ni nujno',
+  normalna: 'Normalno',
+  visoka: 'Nujno',
+}
+
+export const URGENCY_RANK: Record<Urgency, number> = {
+  visoka: 0,
+  normalna: 1,
+  nizka: 2,
+}
+
+export const ALL_URGENCIES: Urgency[] = ['nizka', 'normalna', 'visoka']
 
 export const FAULT_STATUS_LABELS: Record<string, string> = {
   novo: 'Novo',
@@ -83,4 +99,9 @@ export function findWorkstation(id: string) {
 export function findSlot(workstationId: string, slotId: string) {
   const ws = findWorkstation(workstationId)
   return ws?.slots.find((s) => s.id === slotId)
+}
+
+export function normalizeUrgency(raw: unknown): Urgency {
+  if (raw === 'nizka' || raw === 'visoka' || raw === 'normalna') return raw
+  return 'normalna'
 }

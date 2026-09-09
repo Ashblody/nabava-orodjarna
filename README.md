@@ -10,13 +10,16 @@ https://ashblody.github.io/nabava-orodjarna/
 
 ## Funkcije
 
-- **Nabava** — zahteve, kategorije, fotografije, QR, dobavitelji (predlogi), opravila
+- **Nabava** — zahteve z **nujnostjo** (Ni nujno / Normalno / Nujno), kategorije, fotografije, QR, dobavitelji, opravila
+- **Podrobnosti zahteve** — tapni kartico; status lahko vodja prosto spremeni (tudi nazaj: Prejeto → Odprto/Naročeno)
+- **Izvoz** — Excel (CSV UTF-8) in Word (.doc) za odprto/za naročilo ter zgodovino nabavljenega
 - **Zaloge** — količina, min. količina, lokacija, QR, opozorilo nizke zaloge
-- **Okvare** — prijava okvare stroja (Okuma, Genos, MB-*, …), foto, statusi, zgodovina
+- **Okvare** — prijava okvare stroja, foto, statusi (tudi nazaj), zgodovina
 - **Servisi** — koledar/seznam servisov Okuma (vodja ureja)
-- **Zgodovina** — pregled zahtev, okvar in servisov
-- **Prijava** — lokalni računi (tap na ime, brez PIN), vloga delavec/vodja, zapomnjen zadnji uporabnik, registracija spodaj
+- **Zgodovina** — pregled zahtev, okvar in servisov + izvoz
+- **Prijava** — lokalni računi (tap na ime, brez PIN), vloga delavec/vodja, registracija spodaj
 - **QR** — kamera / fotografija (jsQR) ali ročni vnos
+- **Kako deluje** — kratek vodič na prvi strani
 
 ## Lokalni zagon
 
@@ -35,7 +38,7 @@ bun run build
 bun run preview
 ```
 
-`base`: `/nabava-orodjarna/` · GitHub Pages veja `gh-pages`.
+`base`: `/nabava-orodjarna/` · GitHub Pages veja `gh-pages` (samo `dist`).
 
 ## Tehnologija
 

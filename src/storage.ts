@@ -1,4 +1,5 @@
-import type { AppData, Role, Session, UserAccount } from './types.ts'
+import { normalizeUrgency } from './data.ts'
+import type { AppData, ProcurementRequest, Role, Session, UserAccount } from './types.ts'
 
 const DATA_KEY = 'nabava-orodjarna-data-v2'
 const LEGACY_DATA_KEY = 'nabava-orodjarna-data-v1'
@@ -30,6 +31,31 @@ function normalizeUser(raw: unknown): UserAccount | null {
   }
 }
 
+function normalizeRequest(raw: unknown): ProcurementRequest | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Partial<ProcurementRequest>
+  if (typeof r.id !== 'string' || typeof r.title !== 'string') return null
+  return {
+    id: r.id,
+    createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date().toISOString(),
+    createdBy: typeof r.createdBy === 'string' ? r.createdBy : '',
+    workstationId: typeof r.workstationId === 'string' ? r.workstationId : '',
+    workstationName: typeof r.workstationName === 'string' ? r.workstationName : '',
+    slotId: typeof r.slotId === 'string' ? r.slotId : '',
+    slotLabel: typeof r.slotLabel === 'string' ? r.slotLabel : '',
+    category: (r.category as ProcurementRequest['category']) || 'Drugo',
+    title: r.title,
+    note: typeof r.note === 'string' ? r.note : '',
+    urgency: normalizeUrgency(r.urgency),
+    photoDataUrl: typeof r.photoDataUrl === 'string' ? r.photoDataUrl : undefined,
+    qrValue: typeof r.qrValue === 'string' ? r.qrValue : undefined,
+    stockItemId: typeof r.stockItemId === 'string' ? r.stockItemId : undefined,
+    status: (r.status as ProcurementRequest['status']) || 'odprto',
+    supplierNote: typeof r.supplierNote === 'string' ? r.supplierNote : '',
+    history: Array.isArray(r.history) ? r.history : [],
+  }
+}
+
 function migrateLegacy(raw: unknown): AppData {
   const base = emptyData()
   if (!raw || typeof raw !== 'object') return base
@@ -37,9 +63,12 @@ function migrateLegacy(raw: unknown): AppData {
   const users = Array.isArray(parsed.users)
     ? parsed.users.map(normalizeUser).filter((u): u is UserAccount => !!u)
     : []
+  const requests = Array.isArray(parsed.requests)
+    ? parsed.requests.map(normalizeRequest).filter((r): r is ProcurementRequest => !!r)
+    : []
   return {
     ...base,
-    requests: Array.isArray(parsed.requests) ? (parsed.requests as AppData['requests']) : [],
+    requests,
     tasks: Array.isArray(parsed.tasks) ? (parsed.tasks as AppData['tasks']) : [],
     stock: Array.isArray(parsed.stock) ? parsed.stock : [],
     faults: Array.isArray(parsed.faults) ? parsed.faults : [],

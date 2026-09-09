@@ -1,15 +1,20 @@
 import './style.css'
 import {
+  ALL_STATUSES,
+  ALL_URGENCIES,
   CATEGORIES,
   FAULT_STATUS_LABELS,
   MACHINES,
   OKUMA_MACHINES,
   STATUS_LABELS,
+  URGENCY_LABELS,
+  URGENCY_RANK,
   WORKSTATIONS,
   findSlot,
   findWorkstation,
 } from './data.ts'
 import { createUser, findUserByName } from './auth.ts'
+import { downloadExcelCsv, downloadWordDoc, stamp } from './export.ts'
 import { fileToDataUrl } from './image.ts'
 import {
   decodeQrFromFile,
@@ -40,9 +45,12 @@ import type {
   StockItem,
   SupplierRecord,
   Task,
+  Urgency,
 } from './types.ts'
 
 type NabavaSub = 'seznam' | 'nova' | 'opravila' | 'moje'
+
+const HOWTO_KEY = 'nabava-orodjarna-howto-dismissed'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 let data: AppData = loadData()
@@ -50,11 +58,14 @@ let session: Session | null = loadSession()
 let tab: MainTab = 'nabava'
 let nabavaSub: NabavaSub = 'seznam'
 let statusFilter: RequestStatus | 'vse' = 'odprto'
+let urgencyFilter: Urgency | 'vse' = 'vse'
 let faultFilter: FaultStatus | 'vse' = 'novo'
+let detailRequestId: string | null = null
 let toastTimer: number | undefined
 let cameraStream: MediaStream | null = null
 let scanLoop = 0
 let authView: 'pick' | 'register' = 'pick'
+let howtoOpen = !localStorage.getItem(HOWTO_KEY)
 
 function persist() {
   saveData(data)
@@ -84,6 +95,7 @@ function logout() {
   authView = 'pick'
   tab = 'nabava'
   nabavaSub = 'seznam'
+  detailRequestId = null
   render()
 }
 
@@ -95,6 +107,8 @@ function setSession(s: Session) {
   tab = 'nabava'
   nabavaSub = s.role === 'delavec' ? 'nova' : 'seznam'
   statusFilter = s.role === 'vodja' ? 'odprto' : 'vse'
+  urgencyFilter = 'vse'
+  detailRequestId = null
   render()
 }
 
@@ -145,7 +159,6 @@ function render() {
     renderAuth()
     return
   }
-  // Validate session user still exists
   if (!data.users.find((u) => u.id === session!.userId) && data.users.length > 0) {
     logout()
     return
@@ -153,18 +166,41 @@ function render() {
   renderApp()
 }
 
+function howtoPanel(): string {
+  if (!howtoOpen) {
+    return `<button class="howto-link" type="button" data-action="howto-open">Kako deluje?</button>`
+  }
+  return `
+    <section class="howto card">
+      <div class="howto-head">
+        <h2>Kako deluje</h2>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="howto-dismiss">Skrij</button>
+      </div>
+      <ol class="howto-list">
+        <li><strong>Nabava</strong> — oddaj zahtevo (z nujnostjo), vodja naroči in označi prejeto.</li>
+        <li><strong>Odpri kartico</strong> — tapni zahtevo za podrobnosti in spremembo statusa (tudi nazaj).</li>
+        <li><strong>Izvoz</strong> — Excel (CSV) ali Word s seznama / zgodovine.</li>
+        <li><strong>Zaloge · Okvare · Servisi</strong> — ločeni zavihki; QR kjer je smiselno.</li>
+      </ol>
+      <p class="muted small tip-line">Podatki ostanejo v tem brskalniku (ni sinhronizacije med telefoni).</p>
+    </section>`
+}
+
 function shell(content: string) {
-  const tabs: Array<[MainTab, string]> = [
-    ['nabava', 'Nabava'],
-    ['zaloge', 'Zaloge'],
-    ['okvare', 'Okvare'],
-    ['servisi', 'Servisi'],
-    ['zgodovina', 'Zgodovina'],
+  const tabs: Array<[MainTab, string, string]> = [
+    ['nabava', 'Nabava', 'Zahteve'],
+    ['zaloge', 'Zaloge', 'Artikli'],
+    ['okvare', 'Okvare', 'Stroji'],
+    ['servisi', 'Servisi', 'Okuma'],
+    ['zgodovina', 'Zgodovina', 'Arhiv'],
   ]
   const tabsHtml = tabs
     .map(
-      ([id, label]) =>
-        `<button class="tab ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">${label}</button>`,
+      ([id, label, hint]) =>
+        `<button class="tab ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">
+          <span class="tab-label">${label}</span>
+          <span class="tab-hint">${hint}</span>
+        </button>`,
     )
     .join('')
 
@@ -172,20 +208,32 @@ function shell(content: string) {
     <header class="app-header">
       <div>
         <h1>Orodjarna</h1>
-        <div class="sub">${escapeHtml(session!.displayName)}</div>
+        <div class="sub">${escapeHtml(session!.displayName)} · lokalno</div>
       </div>
       <div class="row">
         <span class="badge">${session!.role === 'vodja' ? 'Vodja' : 'Delavec'}</span>
         <button class="btn btn-ghost" type="button" data-action="logout">Odjava</button>
       </div>
     </header>
-    <nav class="tabs">${tabsHtml}</nav>
+    <nav class="tabs" aria-label="Glavni meni">${tabsHtml}</nav>
+    ${howtoPanel()}
     <main>${content}</main>
   `
   app.querySelector('[data-action="logout"]')?.addEventListener('click', logout)
+  app.querySelector('[data-action="howto-dismiss"]')?.addEventListener('click', () => {
+    howtoOpen = false
+    localStorage.setItem(HOWTO_KEY, '1')
+    render()
+  })
+  app.querySelector('[data-action="howto-open"]')?.addEventListener('click', () => {
+    howtoOpen = true
+    localStorage.removeItem(HOWTO_KEY)
+    render()
+  })
   app.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       tab = btn.dataset.tab as MainTab
+      detailRequestId = null
       if (tab === 'nabava' && session!.role === 'delavec') nabavaSub = 'nova'
       if (tab === 'nabava' && session!.role === 'vodja') nabavaSub = 'seznam'
       render()
@@ -225,6 +273,7 @@ function renderAuth() {
 
     <section class="card stack">
       <h2>Registracija</h2>
+      <p class="muted small section-hint">Ustvari račun, nato se prijaviš s tapom na ime (brez PIN-a).</p>
       <form class="stack" id="reg-form">
         <label class="field">Ime
           <input name="name" required maxlength="60" placeholder="npr. Janez Novak" />
@@ -316,6 +365,7 @@ function renderAuth() {
 
     <section class="card stack">
       <h2>Kdo si?</h2>
+      <p class="muted small section-hint">Tapni svoje ime za vstop.</p>
       ${userList}
     </section>
 
@@ -421,11 +471,91 @@ function stockOptions(selected?: string) {
   ].join('')
 }
 
+function urgencyFieldHtml(selected: Urgency = 'normalna', name = 'urgency'): string {
+  const opts = ALL_URGENCIES.map(
+    (u) =>
+      `<option value="${u}" ${u === selected ? 'selected' : ''}>${URGENCY_LABELS[u]}</option>`,
+  ).join('')
+  return `
+    <label class="field">Nujnost
+      <select name="${name}" required>${opts}</select>
+    </label>
+    <p class="muted small field-hint">Tri faze: Ni nujno · Normalno · Nujno (rdeče na seznamu).</p>`
+}
+
+function urgencyBadge(u: Urgency): string {
+  return `<span class="urgency urgency-${u}">${URGENCY_LABELS[u]}</span>`
+}
+
 /* ===================== Nabava ===================== */
-function sortedRequests(filter?: RequestStatus | 'vse'): ProcurementRequest[] {
-  let list = [...data.requests].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+function sortedRequests(
+  filter?: RequestStatus | 'vse',
+  urg?: Urgency | 'vse',
+): ProcurementRequest[] {
+  let list = [...data.requests]
   if (filter && filter !== 'vse') list = list.filter((r) => r.status === filter)
+  if (urg && urg !== 'vse') list = list.filter((r) => r.urgency === urg)
+  list.sort((a, b) => {
+    const ua = URGENCY_RANK[a.urgency] ?? 1
+    const ub = URGENCY_RANK[b.urgency] ?? 1
+    if (ua !== ub) return ua - ub
+    return b.createdAt.localeCompare(a.createdAt)
+  })
   return list
+}
+
+function openToOrder(): ProcurementRequest[] {
+  return sortedRequests('vse').filter((r) => r.status === 'odprto' || r.status === 'naroceno')
+}
+
+function nabavljeno(): ProcurementRequest[] {
+  return sortedRequests('vse').filter((r) => r.status === 'prejeto')
+}
+
+function exportBar(scope: 'open' | 'history' | 'all'): string {
+  return `
+    <div class="export-bar card">
+      <div>
+        <h3 class="export-title">Izvoz</h3>
+        <p class="muted small">Excel = CSV (UTF-8, odpre se v Excelu). Word = .doc (HTML).</p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" type="button" data-export="excel" data-scope="${scope}">Izvoz Excel</button>
+        <button class="btn btn-secondary" type="button" data-export="word" data-scope="${scope}">Izvoz Word</button>
+      </div>
+    </div>`
+}
+
+function bindExportButtons() {
+  app.querySelectorAll<HTMLButtonElement>('[data-export]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.export
+      const scope = btn.dataset.scope || 'open'
+      let list: ProcurementRequest[]
+      let title: string
+      let fileBase: string
+      if (scope === 'open') {
+        list = openToOrder()
+        title = 'Nabava — odprto / za naročilo'
+        fileBase = `nabava-za-narocilo_${stamp()}`
+      } else if (scope === 'history') {
+        list = nabavljeno()
+        title = 'Nabava — nabavljeno (prejeto)'
+        fileBase = `nabava-nabavljeno_${stamp()}`
+      } else {
+        list = sortedRequests('vse')
+        title = 'Nabava — vse zahteve'
+        fileBase = `nabava-vse_${stamp()}`
+      }
+      if (kind === 'excel') {
+        downloadExcelCsv(`${fileBase}.csv`, list)
+        showToast('CSV shranjen (Excel)')
+      } else {
+        downloadWordDoc(`${fileBase}.doc`, title, list)
+        showToast('Word datoteka shranjena')
+      }
+    })
+  })
 }
 
 function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
@@ -440,6 +570,44 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
   const stockLink = stock
     ? `<p><strong>Zaloga:</strong> ${escapeHtml(stock.name)} (${stock.qty} / min ${stock.minQty})</p>`
     : ''
+
+  return `
+    <article class="card request-card urgency-card-${r.urgency}" data-open-request="${r.id}" role="button" tabindex="0">
+      <div class="request-meta">
+        <span class="status ${r.status}">${STATUS_LABELS[r.status]}</span>
+        ${urgencyBadge(r.urgency)}
+        <span>${escapeHtml(r.category)}</span>
+        <span>${formatDateTime(r.createdAt)}</span>
+      </div>
+      <h3 class="request-title">${escapeHtml(r.title)}</h3>
+      <div class="request-meta">
+        <span>${escapeHtml(r.createdBy)}</span>
+        <span>${escapeHtml(r.workstationName)}${r.slotLabel ? ' · ' + escapeHtml(r.slotLabel) : ''}</span>
+      </div>
+      ${r.note ? `<p class="clamp-2">${escapeHtml(r.note)}</p>` : ''}
+      ${qr}
+      ${stockLink}
+      ${supplier}
+      ${photo}
+      <p class="muted small tap-hint">${mode === 'manage' ? 'Odpri za status, dobavitelja in urejanje →' : 'Odpri podrobnosti →'}</p>
+    </article>`
+}
+
+function setRequestStatus(req: ProcurementRequest, to: RequestStatus, note?: string) {
+  if (!session) return
+  req.status = to
+  req.history.push({
+    at: new Date().toISOString(),
+    status: to,
+    by: session.displayName,
+    note: note || req.supplierNote || undefined,
+  })
+  persist()
+  showToast(`Status: ${STATUS_LABELS[to]}`)
+}
+
+function renderRequestDetail(r: ProcurementRequest): string {
+  const stock = r.stockItemId ? data.stock.find((s) => s.id === r.stockItemId) : undefined
   const history = r.history
     .map(
       (h) => `
@@ -454,81 +622,130 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
   const suggestions = suggestSuppliers(r.category, r.title)
   const datalist =
     suggestions.length > 0
-      ? `<datalist id="sup-${r.id}">${suggestions.map((s) => `<option value="${escapeHtml(s.name)}"></option>`).join('')}</datalist>`
+      ? `<datalist id="sup-detail">${suggestions.map((s) => `<option value="${escapeHtml(s.name)}"></option>`).join('')}</datalist>`
       : ''
 
-  let actions = ''
-  if (mode === 'manage' && r.status !== 'prejeto' && r.status !== 'zavrnjeno') {
-    actions = `
-      <div class="stack" style="margin-top:12px">
-        <label class="field">Dobavitelj (kdo/kje)
-          <input type="text" list="sup-${r.id}" data-supplier="${r.id}" value="${escapeHtml(r.supplierNote)}" placeholder="npr. Merkur Celje" autocomplete="off" />
-        </label>
-        ${datalist}
-        <div class="actions">
-          ${r.status === 'odprto' ? `<button class="btn btn-secondary" type="button" data-status="${r.id}" data-to="naroceno">Označi naročeno</button>` : ''}
-          <button class="btn btn-primary" type="button" data-status="${r.id}" data-to="prejeto">Označi prejeto</button>
-          <button class="btn btn-danger" type="button" data-status="${r.id}" data-to="zavrnjeno">Zavrni</button>
-        </div>
-      </div>`
-  }
+  const statusBtns = ALL_STATUSES.map((s) => {
+    const active = r.status === s ? 'active' : ''
+    return `<button class="status-pick ${active} status-${s}" type="button" data-set-status="${s}">${STATUS_LABELS[s]}</button>`
+  }).join('')
+
+  const urgencyOpts = ALL_URGENCIES.map(
+    (u) =>
+      `<option value="${u}" ${u === r.urgency ? 'selected' : ''}>${URGENCY_LABELS[u]}</option>`,
+  ).join('')
+
+  const canEdit = isVodja() || r.createdBy === session!.displayName
 
   return `
-    <article class="card" data-request="${r.id}">
+    <section class="card detail-card urgency-card-${r.urgency}">
+      <div class="row detail-top">
+        <button class="btn btn-ghost" type="button" data-action="detail-back">← Nazaj</button>
+        <span class="muted small">Podrobnosti zahteve</span>
+      </div>
       <div class="request-meta">
         <span class="status ${r.status}">${STATUS_LABELS[r.status]}</span>
+        ${urgencyBadge(r.urgency)}
         <span>${escapeHtml(r.category)}</span>
-        <span>${formatDateTime(r.createdAt)}</span>
       </div>
-      <h3 class="request-title">${escapeHtml(r.title)}</h3>
+      <h2 class="request-title">${escapeHtml(r.title)}</h2>
       <div class="request-meta">
         <span>${escapeHtml(r.createdBy)}</span>
         <span>${escapeHtml(r.workstationName)}${r.slotLabel ? ' · ' + escapeHtml(r.slotLabel) : ''}</span>
+        <span>${formatDateTime(r.createdAt)}</span>
       </div>
       ${r.note ? `<p>${escapeHtml(r.note)}</p>` : ''}
-      ${qr}
-      ${stockLink}
-      ${supplier}
-      ${photo}
-      ${actions}
-      <details style="margin-top:10px">
-        <summary class="muted">Zgodovina statusov</summary>
-        ${history || '<p class="muted">Ni dogodkov.</p>'}
-      </details>
-    </article>`
+      ${r.qrValue ? `<p><strong>QR:</strong> <code>${escapeHtml(r.qrValue)}</code></p>` : ''}
+      ${stock ? `<p><strong>Zaloga:</strong> ${escapeHtml(stock.name)} (${stock.qty} / min ${stock.minQty})</p>` : ''}
+      ${r.photoDataUrl ? `<img class="photo-thumb" src="${r.photoDataUrl}" alt="Fotografija" />` : ''}
+    </section>
+
+    <section class="card stack">
+      <h3>Status (prosto)</h3>
+      <p class="muted small section-hint">Lahko greš naprej ali nazaj: npr. Prejeto → Odprto / Naročeno.</p>
+      <div class="status-picks">${statusBtns}</div>
+    </section>
+
+    <section class="card stack">
+      <h3>Nujnost</h3>
+      <label class="field">
+        <select id="detail-urgency" ${canEdit || isVodja() ? '' : 'disabled'}>${urgencyOpts}</select>
+      </label>
+    </section>
+
+    <section class="card stack">
+      <h3>Dobavitelj</h3>
+      <label class="field">Kdo / kje
+        <input type="text" id="detail-supplier" list="sup-detail" value="${escapeHtml(r.supplierNote)}" placeholder="npr. Merkur Celje" autocomplete="off" ${isVodja() ? '' : 'readonly'} />
+      </label>
+      ${datalist}
+      ${
+        isVodja()
+          ? `<button class="btn btn-secondary btn-block" type="button" data-action="save-supplier">Shrani dobavitelja</button>`
+          : ''
+      }
+    </section>
+
+    <section class="card">
+      <h3>Zgodovina statusov</h3>
+      ${history || '<p class="muted">Ni dogodkov.</p>'}
+    </section>`
 }
 
-function bindManageActions() {
-  app.querySelectorAll<HTMLInputElement>('[data-supplier]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const id = input.dataset.supplier!
-      const req = data.requests.find((r) => r.id === id)
-      if (!req) return
-      req.supplierNote = input.value.trim()
-      if (req.supplierNote) rememberSupplier(req.supplierNote, req.category, req.title)
-      persist()
-      showToast('Dobavitelj shranjen')
+function bindRequestDetail(r: ProcurementRequest) {
+  app.querySelector('[data-action="detail-back"]')?.addEventListener('click', () => {
+    detailRequestId = null
+    render()
+  })
+
+  app.querySelectorAll<HTMLButtonElement>('[data-set-status]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!isVodja()) {
+        showToast('Status lahko spremeni vodja')
+        return
+      }
+      const to = btn.dataset.setStatus as RequestStatus
+      const supplierInput = app.querySelector<HTMLInputElement>('#detail-supplier')
+      if (supplierInput) {
+        r.supplierNote = supplierInput.value.trim()
+        if (r.supplierNote) rememberSupplier(r.supplierNote, r.category, r.title)
+      }
+      setRequestStatus(r, to)
+      render()
     })
   })
-  app.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.status!
-      const to = btn.dataset.to as RequestStatus
-      const req = data.requests.find((r) => r.id === id)
-      if (!req || !session) return
-      const supplierInput = app.querySelector<HTMLInputElement>(`[data-supplier="${id}"]`)
-      if (supplierInput) req.supplierNote = supplierInput.value.trim()
-      if (req.supplierNote) rememberSupplier(req.supplierNote, req.category, req.title)
-      req.status = to
-      req.history.push({
-        at: new Date().toISOString(),
-        status: to,
-        by: session.displayName,
-        note: req.supplierNote || undefined,
-      })
-      persist()
-      showToast(`Status: ${STATUS_LABELS[to]}`)
+
+  app.querySelector('#detail-urgency')?.addEventListener('change', (e) => {
+    if (!isVodja() && r.createdBy !== session!.displayName) return
+    const val = (e.target as HTMLSelectElement).value as Urgency
+    r.urgency = val
+    persist()
+    showToast(`Nujnost: ${URGENCY_LABELS[val]}`)
+    render()
+  })
+
+  app.querySelector('[data-action="save-supplier"]')?.addEventListener('click', () => {
+    const input = app.querySelector<HTMLInputElement>('#detail-supplier')
+    if (!input) return
+    r.supplierNote = input.value.trim()
+    if (r.supplierNote) rememberSupplier(r.supplierNote, r.category, r.title)
+    persist()
+    showToast('Dobavitelj shranjen')
+  })
+}
+
+function bindOpenRequestCards() {
+  app.querySelectorAll<HTMLElement>('[data-open-request]').forEach((el) => {
+    const open = () => {
+      detailRequestId = el.dataset.openRequest || null
       render()
+    }
+    el.addEventListener('click', open)
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        open()
+      }
     })
   })
 }
@@ -573,6 +790,7 @@ function renderTasks(editable: boolean): string {
   return `
     <section class="card">
       <h2>Opravila</h2>
+      <p class="muted small section-hint">Osebni opomniki vodje (npr. naročilo, klic).</p>
       ${form}
     </section>
     <section class="card">
@@ -625,9 +843,19 @@ function bindTasks(editable: boolean) {
 }
 
 function renderNabava(): string {
+  if (detailRequestId) {
+    const req = data.requests.find((r) => r.id === detailRequestId)
+    if (!req) {
+      detailRequestId = null
+    } else {
+      return renderRequestDetail(req)
+    }
+  }
+
   const subs: Array<[NabavaSub, string]> = isVodja()
     ? [
         ['seznam', 'Zahteve'],
+        ['nova', 'Nova'],
         ['opravila', 'Opravila'],
       ]
     : [
@@ -653,6 +881,7 @@ function renderNabava(): string {
       `
       <section class="card">
         <h2>Nova zahteva</h2>
+        <p class="muted small section-hint">Izberi kategorijo, nujnost in opiši, kaj potrebuješ.</p>
         <form class="stack" id="req-form">
           <label class="field">Kategorija
             <select name="category" required>${cats}</select>
@@ -660,8 +889,9 @@ function renderNabava(): string {
           <label class="field">Naslov
             <input name="title" required maxlength="120" placeholder="npr. Sveder Ø8 HSS" />
           </label>
+          ${urgencyFieldHtml('normalna')}
           <label class="field">Opomba
-            <textarea name="note" maxlength="500" placeholder="Količina, merila, nujnost…"></textarea>
+            <textarea name="note" maxlength="500" placeholder="Količina, mere, dodatne informacije…"></textarea>
           </label>
           <label class="field">Poveži z zalogo (neobvezno)
             <select name="stockItemId">${stockOptions()}</select>
@@ -685,6 +915,7 @@ function renderNabava(): string {
     )
     return (
       subNav +
+      `<p class="muted small section-hint pad-hint">Tvoje zahteve — tapni kartico za podrobnosti.</p>` +
       (mine.length === 0
         ? `<div class="card empty">Nimate še zahtev.</div>`
         : mine.map((r) => requestCard(r, 'view')).join(''))
@@ -699,12 +930,26 @@ function renderNabava(): string {
       return `<button class="chip ${statusFilter === f ? 'active' : ''}" type="button" data-filter="${f}">${label}</button>`
     })
     .join('')
-  const list = sortedRequests(statusFilter)
+
+  const urgChips = (['vse', ...ALL_URGENCIES] as const)
+    .map((u) => {
+      const label = u === 'vse' ? 'Vse nujnosti' : URGENCY_LABELS[u]
+      return `<button class="chip chip-urgency ${urgencyFilter === u ? 'active' : ''} ${u !== 'vse' ? 'u-' + u : ''}" type="button" data-urgency-filter="${u}">${label}</button>`
+    })
+    .join('')
+
+  const list = sortedRequests(statusFilter, urgencyFilter)
   const mode = isVodja() ? 'manage' : 'view'
   return (
     subNav +
     `
-    <div class="filters">${chips}</div>
+    <section class="section-block">
+      <h2 class="section-label">Filtri</h2>
+      <p class="muted small section-hint">Status in nujnost. Nujno je na vrhu in označeno rdeče.</p>
+      <div class="filters">${chips}</div>
+      <div class="filters">${urgChips}</div>
+    </section>
+    ${exportBar('open')}
     ${
       list.length === 0
         ? `<div class="card empty">Ni zahtev za ta filter.</div>`
@@ -742,6 +987,7 @@ function bindNewRequestForm() {
     const category = String(fd.get('category')) as Category
     const title = String(fd.get('title') || '').trim()
     const note = String(fd.get('note') || '').trim()
+    const urgency = (String(fd.get('urgency') || 'normalna') as Urgency) || 'normalna'
     const stockItemId = String(fd.get('stockItemId') || '') || undefined
     const qrValue = app.querySelector<HTMLInputElement>('#req-qr')?.value.trim() || undefined
     if (!title) return
@@ -762,6 +1008,7 @@ function bindNewRequestForm() {
       category,
       title,
       note,
+      urgency: ALL_URGENCIES.includes(urgency) ? urgency : 'normalna',
       photoDataUrl,
       qrValue,
       stockItemId,
@@ -814,6 +1061,7 @@ function renderZaloge(): string {
     ? `
     <section class="card">
       <h2>Nova zaloga</h2>
+      <p class="muted small section-hint">Vodi količine in min. zalogo; opozorilo, ko zmanjka.</p>
       <form class="stack" id="stock-form">
         <label class="field">Naziv
           <input name="name" required maxlength="120" />
@@ -911,6 +1159,7 @@ function renderOkvare(): string {
   const form = `
     <section class="card">
       <h2>Prijava okvare</h2>
+      <p class="muted small section-hint">Hitro prijavi okvaro stroja — vodja vodi status.</p>
       <form class="stack" id="fault-form">
         <label class="field">Stroj
           <select name="machine" required>${machines}</select>
@@ -945,7 +1194,8 @@ function renderOkvare(): string {
               .join('')
             const actions = isVodja()
               ? `<div class="actions">
-                  ${f.status === 'novo' ? `<button class="btn btn-secondary" type="button" data-fault-status="${f.id}" data-to="v_delu">V delo</button>` : ''}
+                  ${f.status !== 'novo' ? `<button class="btn btn-ghost" type="button" data-fault-status="${f.id}" data-to="novo">Nazaj: Novo</button>` : ''}
+                  ${f.status !== 'v_delu' ? `<button class="btn btn-secondary" type="button" data-fault-status="${f.id}" data-to="v_delu">V delo</button>` : ''}
                   ${f.status !== 'reseno' ? `<button class="btn btn-primary" type="button" data-fault-status="${f.id}" data-to="reseno">Rešeno</button>` : ''}
                 </div>`
               : ''
@@ -1039,6 +1289,7 @@ function renderServisi(): string {
     ? `
     <section class="card">
       <h2>Nov servis</h2>
+      <p class="muted small section-hint">Načrtuj servis Okuma / MB strojev.</p>
       <form class="stack" id="service-form">
         <label class="field">Datum
           <input name="date" type="date" required />
@@ -1135,6 +1386,12 @@ function bindServisi() {
 
 /* ===================== Zgodovina ===================== */
 function renderZgodovina(): string {
+  if (detailRequestId) {
+    const req = data.requests.find((r) => r.id === detailRequestId)
+    if (req) return renderRequestDetail(req)
+    detailRequestId = null
+  }
+
   const reqs = sortedRequests('vse')
   const faults = [...data.faults].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const services = [...data.services].sort((a, b) => b.date.localeCompare(a.date))
@@ -1142,8 +1399,19 @@ function renderZgodovina(): string {
   return `
     <section class="card">
       <h2>Zgodovina nabave</h2>
-      <p class="muted">${reqs.length} zahtev</p>
+      <p class="muted">${reqs.length} zahtev · tapni kartico za podrobnosti / status</p>
     </section>
+    ${exportBar('all')}
+    <div class="export-bar card">
+      <div>
+        <h3 class="export-title">Samo nabavljeno</h3>
+        <p class="muted small">Status Prejeto — kaj je že bilo naročeno/prejeto.</p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" type="button" data-export="excel" data-scope="history">Izvoz Excel</button>
+        <button class="btn btn-secondary" type="button" data-export="word" data-scope="history">Izvoz Word</button>
+      </div>
+    </div>
     ${reqs.length === 0 ? '<div class="card empty">Ni zahtev.</div>' : reqs.map((r) => requestCard(r, 'view')).join('')}
     <section class="card"><h2>Okvare — arhiv</h2></section>
     ${
@@ -1195,26 +1463,32 @@ function renderApp() {
   shell(content)
 
   if (tab === 'nabava') {
+    if (detailRequestId) {
+      const req = data.requests.find((r) => r.id === detailRequestId)
+      if (req) bindRequestDetail(req)
+      return
+    }
     app.querySelectorAll<HTMLButtonElement>('[data-sub]').forEach((btn) => {
       btn.addEventListener('click', () => {
         nabavaSub = btn.dataset.sub as NabavaSub
+        detailRequestId = null
         render()
       })
     })
     if (nabavaSub === 'opravila') bindTasks(isVodja())
     else if (nabavaSub === 'nova') bindNewRequestForm()
-    else if (nabavaSub === 'seznam' && isVodja()) {
-      bindManageActions()
+    else {
+      bindOpenRequestCards()
+      bindExportButtons()
       app.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((btn) => {
         btn.addEventListener('click', () => {
           statusFilter = btn.dataset.filter as RequestStatus | 'vse'
           render()
         })
       })
-    } else if (nabavaSub === 'seznam') {
-      app.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((btn) => {
+      app.querySelectorAll<HTMLButtonElement>('[data-urgency-filter]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          statusFilter = btn.dataset.filter as RequestStatus | 'vse'
+          urgencyFilter = btn.dataset.urgencyFilter as Urgency | 'vse'
           render()
         })
       })
@@ -1222,6 +1496,15 @@ function renderApp() {
   } else if (tab === 'zaloge') bindZaloge()
   else if (tab === 'okvare') bindOkvare()
   else if (tab === 'servisi') bindServisi()
+  else if (tab === 'zgodovina') {
+    if (detailRequestId) {
+      const req = data.requests.find((r) => r.id === detailRequestId)
+      if (req) bindRequestDetail(req)
+    } else {
+      bindOpenRequestCards()
+      bindExportButtons()
+    }
+  }
 }
 
 render()

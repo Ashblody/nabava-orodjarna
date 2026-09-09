@@ -2,6 +2,8 @@ export type Role = 'vodja' | 'delavec'
 
 export type RequestStatus = 'odprto' | 'naroceno' | 'prejeto' | 'zavrnjeno'
 
+export type Urgency = 'nizka' | 'normalna' | 'visoka'
+
 export type FaultStatus = 'novo' | 'v_delu' | 'reseno'
 
 export type Category =
@@ -60,6 +62,7 @@ export interface ProcurementRequest {
   category: Category
   title: string
   note: string
+  urgency: Urgency
   photoDataUrl?: string
   qrValue?: string
   stockItemId?: string
