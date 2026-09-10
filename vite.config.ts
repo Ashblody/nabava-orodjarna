@@ -10,7 +10,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8'))
 }
 
 const NOTES =
-  'LAN deljeni način: strežnik na :8787, skupni db.json, preverjanje posodobitev.'
+  'Obvestila: in-app badge, brskalnik (Vklopi obvestila), Windows toast notifier. LAN :8787.'
 
 function versionJsonPlugin(): Plugin {
   return {

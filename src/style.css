@@ -781,3 +781,83 @@ label.field {
   margin-top: 18px;
   padding-bottom: 8px;
 }
+
+/* ---- Obvestila / badge ---- */
+.tab {
+  position: relative;
+}
+.tab-count {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #c0392b;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.15rem;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+.tab-count.tab-count-nujno {
+  background: #b71c1c;
+  animation: pulse-nujno 1.6s ease-in-out infinite;
+}
+.tab.active .tab-count {
+  background: #fff;
+  color: #b71c1c;
+}
+@keyframes pulse-nujno {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.notif-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #ffe8e6;
+  color: #8b1a1a;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid #f0b4ae;
+  white-space: nowrap;
+}
+.notif-badge[hidden] { display: none !important; }
+.notif-badge-nujno {
+  background: #c0392b;
+  color: #fff;
+  border-color: #922b21;
+}
+
+.header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.novo-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #2a5f8f;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.request-card.request-new {
+  border-color: #2a5f8f;
+  box-shadow: 0 0 0 2px rgba(42, 95, 143, 0.18), var(--shadow);
+}
+.chip.chip-novo.active {
+  background: #2a5f8f;
+  color: #fff;
+  border-color: #1e4a6e;
+}

@@ -1,6 +1,6 @@
 /** Injected at build time by Vite; fallback for plain tsc/dev. */
 export const APP_VERSION: string =
-  typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'
+  typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.2.0'
 
 export const APP_BUILT_AT: string =
   typeof __APP_BUILT_AT__ !== 'undefined' ? __APP_BUILT_AT__ : ''

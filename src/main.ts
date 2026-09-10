@@ -25,6 +25,7 @@ import {
   escapeHtml,
   formatDate,
   formatDateTime,
+  fetchServerData,
   initData,
   isServerMode,
   loadSession,
@@ -32,6 +33,20 @@ import {
   saveSession,
   uid,
 } from './storage.ts'
+import {
+  badgeDisplayCount,
+  collectRelevantEvents,
+  computeBadge,
+  formatNotifHint,
+  getLastSeenAt,
+  getNotificationPermission,
+  markSeenNow,
+  notifyNewEvents,
+  registerServiceWorker,
+  requestNotificationPermission,
+  requestsFingerprint,
+  type BadgeInfo,
+} from './notifications.ts'
 import { APP_VERSION, fetchRemoteVersion, isNewerVersion } from './version.ts'
 import type {
   AppData,
@@ -63,6 +78,10 @@ let cameraStream: MediaStream | null = null
 let scanLoop = 0
 let authView: 'pick' | 'register' = 'pick'
 let howtoOpen = !localStorage.getItem(HOWTO_KEY)
+let showOnlyNew = false
+let pollTimer: number | undefined
+let lastFingerprint = ''
+let markSeenTimer: number | undefined
 
 function persist() {
   saveData(data)
@@ -178,36 +197,146 @@ function howtoPanel(): string {
         <li><strong>Odpri kartico</strong> — tapni zahtevo za podrobnosti in spremembo statusa (tudi nazaj).</li>
         <li><strong>Izvoz</strong> — Excel (CSV) ali Word s seznama / zgodovine.</li>
         <li><strong>Servisi</strong> — načrtovanje servisov Okuma.</li>
+        <li><strong>Obvestila</strong> — badge na zavihku Nabava; gumb »Vklopi obvestila«; Windows toast (notifier) ko je brskalnik zaprt.</li>
       </ol>
       <p class="muted small tip-line">${isServerMode() ? 'Podatki so na LAN strežniku (deljeni med napravami v omrežju).' : 'Podatki ostanejo v tem brskalniku (ni sinhronizacije med telefoni).'}</p>
     </section>`
 }
 
+function currentBadge(): BadgeInfo | null {
+  if (!session) return null
+  return computeBadge(data.requests, session, getLastSeenAt(session.userId))
+}
+
+function scheduleMarkSeen() {
+  if (!session) return
+  window.clearTimeout(markSeenTimer)
+  markSeenTimer = window.setTimeout(() => {
+    if (!session) return
+    // Only auto-mark when user is actually looking at lists
+    if (tab !== 'nabava') return
+    if (nabavaSub === 'nova') return
+    if (document.visibilityState !== 'visible') return
+    markSeenNow(session.userId)
+    updateBadgeDom()
+  }, 4000)
+}
+
+function updateBadgeDom() {
+  if (!session) return
+  const info = currentBadge()
+  if (!info) return
+  const count = badgeDisplayCount(info, session.role)
+  const hint = formatNotifHint(info, session.role)
+  const tabBtn = app.querySelector<HTMLElement>('.tab-nabava')
+  if (tabBtn) {
+    let pill = tabBtn.querySelector<HTMLElement>('.tab-count')
+    if (count > 0) {
+      if (!pill) {
+        pill = document.createElement('span')
+        pill.className = 'tab-count'
+        tabBtn.appendChild(pill)
+      }
+      pill.textContent = String(count)
+      pill.classList.toggle('tab-count-nujno', info.nujnoOpen > 0 && session.role === 'vodja')
+    } else if (pill) {
+      pill.remove()
+    }
+  }
+  const headerBadge = app.querySelector<HTMLElement>('[data-notif-badge]')
+  if (headerBadge) {
+    if (hint) {
+      headerBadge.hidden = false
+      headerBadge.textContent = hint
+      headerBadge.classList.toggle('notif-badge-nujno', info.nujnoOpen > 0 && session.role === 'vodja')
+    } else {
+      headerBadge.hidden = true
+      headerBadge.textContent = ''
+    }
+  }
+}
+
+function notifButtonLabel(): string {
+  const p = getNotificationPermission()
+  if (p === 'unsupported') return ''
+  if (p === 'granted') return 'Obvestila vklopljena'
+  if (p === 'denied') return 'Obvestila zavrnjena'
+  return 'Vklopi obvestila'
+}
+
+async function onToggleNotifications() {
+  const p = getNotificationPermission()
+  if (p === 'unsupported') {
+    showToast('Brskalnik ne podpira obvestil')
+    return
+  }
+  if (p === 'denied') {
+    showToast('Obvestila so zavrnjena v nastavitvah brskalnika')
+    return
+  }
+  if (p === 'granted') {
+    showToast('Obvestila so že vklopljena')
+    return
+  }
+  const next = await requestNotificationPermission()
+  if (next === 'granted') {
+    showToast('Obvestila vklopljena')
+    if (session) {
+      const evs = collectRelevantEvents(data.requests, session, getLastSeenAt(session.userId))
+      // Don't flood on enable — only future events
+      void evs
+    }
+  } else {
+    showToast('Obvestila niso dovoljena')
+  }
+  render()
+}
+
 function shell(content: string) {
+  const info = currentBadge()
+  const count = info && session ? badgeDisplayCount(info, session.role) : 0
+  const hint = info && session ? formatNotifHint(info, session.role) : ''
+  const nujnoClass = info && info.nujnoOpen > 0 && session?.role === 'vodja' ? 'tab-count-nujno' : ''
+
   const tabs: Array<[MainTab, string, string, string]> = [
     ['nabava', '▣', 'Nabava', 'Zahteve'],
     ['servisi', '⚙', 'Servisi', 'Okuma'],
     ['zgodovina', '▤', 'Zgodovina', 'Arhiv'],
   ]
   const tabsHtml = tabs
-    .map(
-      ([id, icon, label, hint]) =>
-        `<button class="tab tab-${id} ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">
+    .map(([id, icon, label, hintTab]) => {
+      const countHtml =
+        id === 'nabava' && count > 0
+          ? `<span class="tab-count ${nujnoClass}">${count}</span>`
+          : ''
+      return `<button class="tab tab-${id} ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">
           <span class="tab-icon">${icon}</span>
           <span class="tab-label">${label}</span>
-          <span class="tab-hint">${hint}</span>
-        </button>`,
-    )
+          <span class="tab-hint">${hintTab}</span>
+          ${countHtml}
+        </button>`
+    })
     .join('')
 
   const modeLabel = isServerMode() ? 'LAN deljeno' : 'lokalno'
+  const notifLabel = notifButtonLabel()
+  const notifBtn = notifLabel
+    ? `<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-notif" title="Brskalniška obvestila">${escapeHtml(notifLabel)}</button>`
+    : ''
+  const headerNotif =
+    hint
+      ? `<span class="notif-badge ${info && info.nujnoOpen > 0 && session?.role === 'vodja' ? 'notif-badge-nujno' : ''}" data-notif-badge>${escapeHtml(hint)}</span>`
+      : `<span class="notif-badge" data-notif-badge hidden></span>`
+
   app.innerHTML = `
     <header class="app-header">
       <div>
         <h1>Orodjarna</h1>
         <div class="sub">${escapeHtml(session!.displayName)} · ${modeLabel} · v${APP_VERSION}</div>
       </div>
-      <div class="row">
+      <div class="row header-actions">
+        ${headerNotif}
+        ${notifBtn}
         <button class="btn btn-ghost btn-sm" type="button" data-action="check-update" title="Preveri posodobitev">Preveri posodobitev</button>
         <span class="badge">${session!.role === 'vodja' ? 'Vodja' : 'Delavec'}</span>
         <button class="btn btn-ghost" type="button" data-action="logout">Odjava</button>
@@ -220,6 +349,9 @@ function shell(content: string) {
   app.querySelector('[data-action="logout"]')?.addEventListener('click', logout)
   app.querySelector('[data-action="check-update"]')?.addEventListener('click', () => {
     void checkForUpdate(true)
+  })
+  app.querySelector('[data-action="toggle-notif"]')?.addEventListener('click', () => {
+    void onToggleNotifications()
   })
   app.querySelector('[data-action="howto-dismiss"]')?.addEventListener('click', () => {
     howtoOpen = false
@@ -554,7 +686,7 @@ function bindExportButtons() {
   })
 }
 
-function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
+function requestCard(r: ProcurementRequest, mode: 'manage' | 'view', isNew = false): string {
   const supplier = r.supplierNote
     ? `<p><strong>Dobavitelj:</strong> ${escapeHtml(r.supplierNote)}</p>`
     : ''
@@ -562,12 +694,14 @@ function requestCard(r: ProcurementRequest, mode: 'manage' | 'view'): string {
     ? `<img class="photo-thumb" src="${r.photoDataUrl}" alt="Fotografija zahteve" />`
     : ''
   const qr = r.qrValue ? `<p><strong>QR:</strong> <code>${escapeHtml(r.qrValue)}</code></p>` : ''
+  const novo = isNew ? `<span class="novo-pill">Novo</span>` : ''
 
   return `
-    <article class="card request-card urgency-card-${r.urgency}" data-open-request="${r.id}" role="button" tabindex="0">
+    <article class="card request-card urgency-card-${r.urgency} ${isNew ? 'request-new' : ''}" data-open-request="${r.id}" role="button" tabindex="0">
       <div class="request-meta">
         <span class="status ${r.status}">${STATUS_LABELS[r.status]}</span>
         ${urgencyBadge(r.urgency)}
+        ${novo}
         <span>${escapeHtml(r.category)}</span>
         <span>${formatDateTime(r.createdAt)}</span>
       </div>
@@ -891,20 +1025,27 @@ function renderNabava(): string {
   }
 
   if (nabavaSub === 'moje') {
-    const mine = sortedRequests('vse').filter(
+    const badge = currentBadge()
+    const newIds = badge?.newIds || new Set<string>()
+    let mine = sortedRequests('vse').filter(
       (r) =>
         r.createdBy === session!.displayName ||
         (session!.workstationId && r.workstationId === session!.workstationId),
     )
+    if (showOnlyNew) mine = mine.filter((r) => newIds.has(r.id))
+    const novoChip = `<div class="filters"><button class="chip ${showOnlyNew ? 'active' : ''}" type="button" data-filter-new="1">Samo novo${badge && badge.newCount ? ` (${badge.newCount})` : ''}</button></div>`
     return (
       subNav +
+      novoChip +
       (mine.length === 0
-        ? `<div class="card empty">Nimate še zahtev.</div>`
-        : mine.map((r) => requestCard(r, 'view')).join(''))
+        ? `<div class="card empty">${showOnlyNew ? 'Ni novih posodobitev.' : 'Nimate še zahtev.'}</div>`
+        : mine.map((r) => requestCard(r, 'view', newIds.has(r.id))).join(''))
     )
   }
 
   // seznam
+  const badge = currentBadge()
+  const newIds = badge?.newIds || new Set<string>()
   const filters: Array<RequestStatus | 'vse'> = ['odprto', 'naroceno', 'prejeto', 'zavrnjeno', 'vse']
   const chips = filters
     .map((f) => {
@@ -920,20 +1061,27 @@ function renderNabava(): string {
     })
     .join('')
 
-  const list = sortedRequests(statusFilter, urgencyFilter)
+  const novoChip = `<button class="chip chip-novo ${showOnlyNew ? 'active' : ''}" type="button" data-filter-new="1">Novo${badge && badge.newCount ? ` (${badge.newCount})` : ''}</button>`
+
+  let list = sortedRequests(statusFilter, urgencyFilter)
+  if (showOnlyNew) list = list.filter((r) => newIds.has(r.id))
   const mode = isVodja() ? 'manage' : 'view'
+  const markBtn =
+    badge && (badge.newCount > 0 || (session!.role === 'vodja' && badge.openCount > 0))
+      ? `<button class="btn btn-ghost btn-sm" type="button" data-action="mark-seen">Označi kot prebrano</button>`
+      : ''
   return (
     subNav +
     `
     <section class="section-block">
-      <div class="filters">${chips}</div>
-      <div class="filters">${urgChips}</div>
+      <div class="filters">${chips}${novoChip}</div>
+      <div class="filters">${urgChips}${markBtn}</div>
     </section>
     ${exportBar('open')}
     ${
       list.length === 0
-        ? `<div class="card empty">Ni zahtev za ta filter.</div>`
-        : list.map((r) => requestCard(r, mode)).join('')
+        ? `<div class="card empty">${showOnlyNew ? 'Ni novih zahtev.' : 'Ni zahtev za ta filter.'}</div>`
+        : list.map((r) => requestCard(r, mode, newIds.has(r.id))).join('')
     }`
   )
 }
@@ -1172,9 +1320,11 @@ function renderApp() {
     else {
       bindOpenRequestCards()
       bindExportButtons()
+      scheduleMarkSeen()
       app.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((btn) => {
         btn.addEventListener('click', () => {
           statusFilter = btn.dataset.filter as RequestStatus | 'vse'
+          showOnlyNew = false
           render()
         })
       })
@@ -1183,6 +1333,19 @@ function renderApp() {
           urgencyFilter = btn.dataset.urgencyFilter as Urgency | 'vse'
           render()
         })
+      })
+      app.querySelectorAll<HTMLButtonElement>('[data-filter-new]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          showOnlyNew = !showOnlyNew
+          render()
+        })
+      })
+      app.querySelector('[data-action="mark-seen"]')?.addEventListener('click', () => {
+        if (!session) return
+        markSeenNow(session.userId)
+        showOnlyNew = false
+        showToast('Označeno kot prebrano')
+        render()
       })
     }
   } else if (tab === 'servisi') bindServisi()
@@ -1215,6 +1378,68 @@ async function checkForUpdate(manual = false) {
   }
 }
 
+async function applyPolledData(next: typeof data, opts?: { silent?: boolean }) {
+  const fp = requestsFingerprint(next)
+  if (fp === lastFingerprint) return
+  const prevFp = lastFingerprint
+  lastFingerprint = fp
+  data = next
+
+  if (!session) {
+    if (!opts?.silent) render()
+    return
+  }
+
+  const since = getLastSeenAt(session.userId)
+  const events = collectRelevantEvents(data.requests, session, since)
+  // Browser toast when tab may be hidden / background
+  await notifyNewEvents(events, true)
+
+  const fillingForm = !!app.querySelector('#req-form input[name="title"]') &&
+    !!(app.querySelector<HTMLInputElement>('#req-form input[name="title"]')?.value.trim())
+  if (fillingForm) {
+    updateBadgeDom()
+    if (prevFp && !opts?.silent) {
+      // lightweight hint without wiping the form
+      const existing = document.querySelector('.poll-hint')
+      if (!existing) {
+        const el = document.createElement('div')
+        el.className = 'toast poll-hint'
+        el.textContent = 'Nove zahteve v ozadju — shrani obrazec, nato osveži'
+        document.body.appendChild(el)
+        window.setTimeout(() => el.remove(), 3200)
+      }
+    }
+    return
+  }
+  render()
+}
+
+async function pollOnce() {
+  if (!isServerMode() || !session) return
+  const next = await fetchServerData()
+  if (!next) return
+  await applyPolledData(next, { silent: false })
+}
+
+function startPolling() {
+  window.clearInterval(pollTimer)
+  if (!isServerMode()) return
+  const tick = () => {
+    void pollOnce()
+  }
+  const arm = () => {
+    window.clearInterval(pollTimer)
+    const ms = document.visibilityState === 'visible' ? 20000 : 30000
+    pollTimer = window.setInterval(tick, ms)
+  }
+  arm()
+  document.addEventListener('visibilitychange', () => {
+    arm()
+    if (document.visibilityState === 'visible') void pollOnce()
+  })
+}
+
 async function bootstrap() {
   app.innerHTML = `<div class="login-hero"><div class="logo">NO</div><p class="muted">Nalagam…</p></div>`
   try {
@@ -1222,8 +1447,11 @@ async function bootstrap() {
   } catch {
     data = emptyData()
   }
+  lastFingerprint = requestsFingerprint(data)
   render()
   void checkForUpdate(false)
+  void registerServiceWorker()
+  startPolling()
 }
 
 bootstrap()

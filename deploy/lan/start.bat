@@ -2,42 +2,44 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-if not exist "runtime\node\node.exe" (
-  echo.
-  echo MANJKA portable Node.js:
-  echo   pricakovana pot: runtime\node\node.exe
-  echo Glej NAVODILA-LAN.md / README.md.
-  echo.
+if not exist "%~dp0runtime\node\node.exe" (
+  echo MANJKA: runtime node node.exe
+  pause
+  exit /b 1
+)
+if not exist "%~dp0dist\index.html" (
+  echo MANJKA: dist index.html
+  pause
+  exit /b 1
+)
+if not exist "%~dp0server\index.js" (
+  echo MANJKA: server index.js
+  pause
+  exit /b 1
+)
+if not exist "%~dp0data" mkdir "%~dp0data"
+if not exist "%~dp0start-hidden.vbs" (
+  echo MANJKA: start-hidden.vbs
   pause
   exit /b 1
 )
 
-if not exist "dist\index.html" (
-  echo Manjka mapa dist\ z zgrajeno aplikacijo.
+netstat -ano | findstr ":8787" | findstr "LISTENING" >nul
+if not errorlevel 1 (
+  echo Streznik ze tece SKRITO na 8787.
+  echo Odpri: http://192.168.1.124:8787/
+  echo Zaustavi: taskkill /IM node.exe /F
   pause
-  exit /b 1
+  exit /b 0
 )
 
-if not exist "server\index.js" (
-  echo Manjka server\index.js
-  pause
-  exit /b 1
-)
-
-if not exist "data" mkdir data
-
-set NABAVA_DATA_DIR=%~dp0data
-set PORT=8787
-
-echo Zaganjam Nabava Orodjarna LAN streznik...
-echo   Podatki: %NABAVA_DATA_DIR%
-echo   Odpri v brskalniku: http://192.168.1.50:8787/  (ali IP tega PC-ja)
-echo   Zaustavi z Ctrl+C
+echo Zaganjam SKRITO v ozadju (ni v orodni vrstici).
+echo Odpri: http://192.168.1.124:8787/
+echo Zaustavi: taskkill /IM node.exe /F
 echo.
 
-"runtime\node\node.exe" "server\index.js"
-set ERR=%ERRORLEVEL%
-echo.
-if not "%ERR%"=="0" echo Streznik se je ustavil z napako %ERR%.
+wscript //nologo "%~dp0start-hidden.vbs"
+timeout /t 2 /nobreak >nul
+echo Zagnano skrito. To okno lahko zapres.
 pause
-exit /b %ERR%
+exit /b 0

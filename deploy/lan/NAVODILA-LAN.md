@@ -34,7 +34,7 @@ NabavaOrodjarna\\
 1. Na PC-ju, ki bo gostil (npr. Oro455), odpri mapo.
 2. Dvakrat klikni **`start.bat`**.
 3. V brskalniku (tem PC-ju ali telefonih v omrežju) odpri:
-   - `http://192.168.1.50:8787/`
+   - `http://192.168.1.124:8787/`
      (zamenjaj z IP gostitelja, če je drugačen)
 4. Windows požarni zid lahko prvič vpraša — dovoli **zasebno omrežje** za Node na vratih **8787**.
 
@@ -71,3 +71,13 @@ bun run server   # lokalno, potrebuje dist/
 ```
 
 Privzeti port: `8787`. Podatki: `NABAVA_DATA_DIR` (privzeto `./data`).
+
+## Windows toast obvestila (Chrome zaprt)
+
+Glej mapo `notifier\` in `notifier\NAVODILA-OBVESTILA.md`.
+
+Kratko: na vsakem PC-ju zaženi `notifier\start-notifier-hidden.vbs`
+(ali Task Scheduler ob prijavi z **UNC** potjo). Privzeti API:
+`http://192.168.1.124:8787/api/data`.
+
+V brskalniku (ko je stran odprta): gumb **Vklopi obvestila**.

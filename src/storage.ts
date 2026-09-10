@@ -153,6 +153,19 @@ export async function initData(): Promise<AppData> {
   }
 }
 
+/** Soft reload from LAN API (polling). Returns null if not server mode or failed. */
+export async function fetchServerData(): Promise<AppData | null> {
+  if (!serverMode) return null
+  try {
+    const res = await fetch('/api/data', { cache: 'no-store' })
+    if (!res.ok) return null
+    const serverRaw = await res.json()
+    return migrateLegacy(serverRaw)
+  } catch {
+    return null
+  }
+}
+
 /** Sync load from localStorage only (legacy / before init). Prefer initData(). */
 export function loadData(): AppData {
   return loadLocalData()

@@ -22,6 +22,8 @@ https://ashblody.github.io/nabava-orodjarna/
 - **Prijava** — lokalni računi (tap na ime, brez PIN)
 - **QR** — kamera / fotografija (jsQR) ali ročni vnos
 - **Preveri posodobitev** — primerja vgrajeni `APP_VERSION` z `/version.json`
+- **Obvestila** — in-app badge (novo/odprto), brskalniška Notification API,
+  Windows toast spremljevalec (`deploy/lan/notifier/`) ko je Chrome zaprt
 
 ## Lokalni zagon
 
@@ -45,8 +47,8 @@ Glej `deploy/lan/NAVODILA-LAN.md`. Kratko:
 
 1. Pripravi pack (`dist/`, `server/`, `start.bat`, prazna `data/`).
 2. Namesti **portable Node** v `runtime\\node\\node.exe` (ne v git).
-3. Zazeni `start.bat` na PC-ju z IP (npr. 192.168.1.50).
-4. Odpri `http://192.168.1.50:8787/`.
+3. Zazeni `start.bat` na PC-ju z IP (npr. 192.168.1.124).
+4. Odpri `http://192.168.1.124:8787/`.
 
 ## Tehnologija
 

@@ -1,0 +1,5 @@
+{
+  "apiUrl": "http://192.168.1.124:8787/api/data",
+  "pollSeconds": 30,
+  "role": "vodja"
+}
