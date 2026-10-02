@@ -6,6 +6,7 @@
  *  - pred vsakim zapisom (PUT) se prejsnja veljavna razlicica kopira v db.prev.json
  *  - varnostne kopije v data/backups/db-YYYY-MM-DD_HHMMSS.json
  *    (ob zagonu + dnevno, hrani zadnjih 14)
+ *  - neobvezno: kopije se zrcalijo se v omrezno mapo (NABAVA_BACKUP_SHARE), ce je nastavljena
  *
  * Oblika db.json se ne spreminja.
  */
@@ -36,7 +37,7 @@ export function stamp(d = new Date()) {
   )
 }
 
-export function createStore(dataDir, log = console) {
+export function createStore(dataDir, log = console, offsiteDir = '') {
   const dir = path.resolve(dataDir)
   const dbPath = path.join(dir, 'db.json')
   const prevPath = path.join(dir, 'db.prev.json')
@@ -169,6 +170,45 @@ export function createStore(dataDir, log = console) {
     return backup(now)
   }
 
+  // ---- kopija izven racunalnika (omrezna mapa), neobvezno; prazno = izklopljeno.
+  // Nikoli ne ustavi streznika: ce mapa ni dosegljiva, samo opozori v log (enkrat).
+  const offsite = (offsiteDir || '').trim()
+  let offsiteWarned = false
+  let offsiteBusy = false
+
+  /** Prekopira lokalne kopije, ki jih v omrezni mapi se ni, in obdrzi zadnjih 14. Asinhrono. */
+  async function mirrorOffsite() {
+    if (!offsite || offsiteBusy) return { copied: [], error: null }
+    offsiteBusy = true
+    const copied = []
+    try {
+      await fs.promises.mkdir(offsite, { recursive: true })
+      const have = new Set((await fs.promises.readdir(offsite)).filter((f) => /^db-\d{4}-\d{2}-\d{2}_\d{6}\.json$/.test(f)))
+      for (const f of listBackups()) {
+        if (have.has(f)) continue
+        const tmp = path.join(offsite, f + '.tmp')
+        await fs.promises.copyFile(path.join(backupDir, f), tmp)
+        await fs.promises.rename(tmp, path.join(offsite, f))
+        have.add(f)
+        copied.push(f)
+      }
+      const all = [...have].sort()
+      for (const f of all.slice(0, Math.max(0, all.length - KEEP_BACKUPS))) {
+        await fs.promises.unlink(path.join(offsite, f)).catch(() => {})
+      }
+      if (offsiteWarned) log.log('[db] omrezna mapa spet dosegljiva')
+      offsiteWarned = false
+      if (copied.length) log.log(`[db] kopija v omrezno mapo (${offsite}): ${copied.join(', ')}`)
+      return { copied, error: null }
+    } catch (err) {
+      if (!offsiteWarned) log.error(`[db] OPOZORILO: omrezna mapa ni dosegljiva (${offsite}): ${err.message}. Streznik dela naprej.`)
+      offsiteWarned = true
+      return { copied, error: err }
+    } finally {
+      offsiteBusy = false
+    }
+  }
+
   function startBackups(intervalMs = 60 * 60 * 1000) {
     try {
       const n = backup()
@@ -176,6 +216,7 @@ export function createStore(dataDir, log = console) {
     } catch (err) {
       log.error(`[db] varnostna kopija ni uspela: ${err.message}`)
     }
+    mirrorOffsite().catch(() => {})
     const t = setInterval(() => {
       try {
         const n = backupIfDue()
@@ -183,10 +224,11 @@ export function createStore(dataDir, log = console) {
       } catch (err) {
         log.error(`[db] dnevna kopija ni uspela: ${err.message}`)
       }
+      mirrorOffsite().catch(() => {})
     }, intervalMs)
     t.unref()
     return t
   }
 
-  return { dir, dbPath, prevPath, backupDir, readDb, writeDb, backup, backupIfDue, listBackups, pruneBackups, startBackups }
+  return { dir, dbPath, prevPath, backupDir, readDb, writeDb, backup, backupIfDue, listBackups, pruneBackups, startBackups, mirrorOffsite, offsiteDir: offsite }
 }

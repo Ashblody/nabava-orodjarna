@@ -124,3 +124,40 @@ test('startBackups: kopija ob zagonu', () => {
   clearInterval(t)
   assert.equal(s.listBackups().length, 1)
 })
+
+test('omrezna mapa: zrcali kopije, hrani 14, ponovni klic ne podvaja', async () => {
+  const d = tmpDir()
+  const share = path.join(tmpDir(), 'skupno', 'backup')
+  const s = createStore(d, quiet, share)
+  for (let i = 1; i <= 16; i++) {
+    s.writeDb(sample(i))
+    s.backup(new Date(2026, 1, i, 8, 0, 0))
+  }
+  const r = await s.mirrorOffsite()
+  assert.equal(r.error, null)
+  const files = fs.readdirSync(share).sort()
+  assert.equal(files.length, 14)
+  assert.equal(files[13], 'db-2026-02-16_080000.json')
+  const r2 = await s.mirrorOffsite()
+  assert.deepEqual(r2.copied, [])
+})
+
+test('omrezna mapa nedosegljiva: napaka se samo zabelezi, streznik dela naprej', async () => {
+  const d = tmpDir()
+  const blocker = path.join(tmpDir(), 'datoteka')
+  fs.writeFileSync(blocker, 'x') // pod datoteko mape ni mogoce ustvariti
+  const msgs = []
+  const s = createStore(d, { log() {}, error: (m) => msgs.push(m) }, path.join(blocker, 'backup'))
+  s.writeDb(sample(1))
+  s.backup()
+  const r = await s.mirrorOffsite()
+  assert.ok(r.error)
+  await s.mirrorOffsite()
+  assert.equal(msgs.filter((m) => m.includes('OPOZORILO')).length, 1) // samo enkrat
+  assert.deepEqual(s.readDb(), sample(1)) // delovanje ni prizadeto
+})
+
+test('omrezna mapa prazna = izklopljeno', async () => {
+  const s = createStore(tmpDir(), quiet, '')
+  assert.deepEqual(await s.mirrorOffsite(), { copied: [], error: null })
+})

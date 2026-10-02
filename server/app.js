@@ -80,9 +80,9 @@ function serveStatic(DIST, req, res, urlPath) {
   })
 }
 
-export function createApp({ dataDir, distDir, log = console }) {
+export function createApp({ dataDir, distDir, log = console, offsiteDir = '' }) {
   const DIST = path.resolve(distDir)
-  const store = createStore(dataDir, log)
+  const store = createStore(dataDir, log, offsiteDir)
   store.readDb() // preveri db.json ob zagonu (pokvarjen -> db.corrupt-*.json)
 
   const server = http.createServer(async (req, res) => {
