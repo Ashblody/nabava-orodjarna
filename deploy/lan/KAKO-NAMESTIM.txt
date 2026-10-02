@@ -1,0 +1,60 @@
+KAKO NAMESTIM  -  Nabava Orodjarna (obvestila)
+===============================================
+
+Aplikacija in podatki so na enem računalniku: Oro455 (192.168.1.124).
+Naslov aplikacije za vse:   http://192.168.1.124:8787/
+
+
+A) STREŽNIK  -  samo ENKRAT, samo na Oro455 (192.168.1.124)
+-----------------------------------------------------------
+ 1. Desni klik na ZIP > "Razširi vse".
+ 2. Dvoklik na  NAMESTI-STREZNIK.bat
+    (ob vprašanju o omrežni mapi za kopijo samo klikni "V redu").
+ 3. Počakaj sporočilo "Strežnik TEČE". Konec. Ne klikaj več nič:
+    strežnik se po vsaki prijavi v Windows zažene sam, skrit.
+
+ Če drugi računalniki ne odprejo strani:
+ desni klik na NAMESTI-STREZNIK.bat > "Zaženi kot skrbnik" (enkrat).
+
+ Podatki so v C:\NabavaOrodjarna\data  (varnostne kopije: data\backups).
+ Če je PC izklopljen, aplikacija ne dela - ob vklopu in prijavi steče sama.
+
+
+B) VSAK RAČUNALNIK  -  obvestila (3 koraki, brez skrbnika)
+----------------------------------------------------------
+ 1. Desni klik na ZIP > "Razširi vse".
+ 2. Dvoklik na  NAMESTI-OBVESTILA.bat
+ 3. Klikni SVOJE IME na seznamu > "V redu".
+
+ Takoj dobiš preizkusno obvestilo + zvok. Zraven ure je ikona "N".
+ (Če je ne vidiš, klikni puščico ^ ob uri.)
+ Od zdaj naprej se vse zažene samo ob vsaki prijavi v Windows.
+
+ Če Windows vpraša "Windows je zaščitil vaš računalnik":
+ klikni "Več informacij" > "Vseeno zaženi".
+
+ Zamenjava imena: poženi NAMESTI-OBVESTILA.bat še enkrat.
+ Odstranitev:     dvoklik ODSTRANI-OBVESTILA.bat
+
+
+TEŽAVE - OBVESTILA SE NE POKAŽEJO
+---------------------------------
+ 1. "Ne moti" / Focus Assist: Nastavitve > Sistem > Fokus (Windows 11) ali
+    Pomoč pri fokusu (Windows 10) > izberi "Izklopljeno".
+    Med igro / predstavitvijo / celozaslonskim oknom se obvestila skrijejo
+    (ostanejo v Centru za obvestila: ikona ob uri, čisto desno).
+ 2. Nastavitve > Sistem > Obvestila:
+    - "Prejemanje obvestil od aplikacij in drugih pošiljateljev" = VKLOP
+    - na seznamu poišči "Nabava Orodjarna" (ali "Windows PowerShell") = VKLOP,
+      "Pokaži obvestilne pasice" in "Predvajaj zvok" = VKLOP.
+ 3. Zvok: preveri, da PC ni utišan (ikona zvočnika ob uri).
+ 4. Desni klik na ikono "N" > "Preizkusni toast". Če se pokaže samo mehurček
+    pri uri, so obvestila izklopljena v Windows (točka 1 in 2).
+ 5. Ikone "N" ni? Poženi NAMESTI-OBVESTILA.bat še enkrat.
+ 6. Ikona je rdeča = ni povezave s strežnikom (Oro455 je izklopljen ali
+    nisi v istem omrežju). Ko strežnik spet teče, se poveže sama.
+ 7. Zapis za razvijalca:  %LOCALAPPDATA%\NabavaOrodjarna\notifier.log
+    (v Raziskovalec vpiši to besedilo v naslovno vrstico).
+ 8. Antivirus (WithSecure) javi blokado? Pošlji sliko sporočila Andreju.
+
+Ikona "N" > desni klik:  Odpri  |  Utišaj 1 h  |  Preizkusni toast  |  Izhod
