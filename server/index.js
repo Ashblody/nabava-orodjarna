@@ -19,7 +19,7 @@ const HOST = '0.0.0.0'
 const DATA_DIR = path.resolve(process.env.NABAVA_DATA_DIR || path.join(process.cwd(), 'data'))
 const DIST = path.resolve(__dirname, '..', 'dist')
 
-const { server, store } = createApp({ dataDir: DATA_DIR, distDir: DIST, offsiteDir: process.env.NABAVA_BACKUP_SHARE || '' })
+const { server, store, board } = createApp({ dataDir: DATA_DIR, distDir: DIST, offsiteDir: process.env.NABAVA_BACKUP_SHARE || '' })
 
 server.on('error', (err) => {
   console.error(`Streznik ni mogel zagnati (${err.code || err.message}). Port ${PORT} je morda ze zaseden.`)
@@ -33,4 +33,5 @@ server.listen(PORT, HOST, () => {
   console.log(`  dist: ${DIST}`)
   console.log(`  kopija v omrezno mapo: ${store.offsiteDir || '(izklopljeno)'}`)
   store.startBackups()
+  board.startBackups()
 })

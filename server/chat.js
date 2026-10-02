@@ -375,10 +375,12 @@ export function createChat(dataDir, log = console, opts = {}) {
   }
 
   /** Kompakten seznam za Windows notifier (toast). since ni podan -> samo trenutni seq (brez poplave). */
-  function notifyPoll(userId, since) {
+  let boardNotify = null
+  function notifyPoll(userId, since, bsince) {
     const me = requireUser(userId)
+    const b = boardNotify ? boardNotify(me.id, bsince) : { bseq: 0, items: [] }
     if (since === undefined || since === null || since === '' || !Number.isFinite(Number(since))) {
-      return { seq, items: [] }
+      return { seq, bseq: b.bseq, items: [] }
     }
     const s = Number(since)
     const items = []
@@ -388,6 +390,7 @@ export function createChat(dataDir, log = console, opts = {}) {
       const isDm = ev.channel.startsWith('dm:')
       const where = isDm ? ev.name : `${channelName(ev.channel, me.id)} · ${ev.name}`
       items.push({
+        kind: 'chat',
         seq: ev.seq,
         channel: ev.channel,
         title: where,
@@ -400,7 +403,7 @@ export function createChat(dataDir, log = console, opts = {}) {
       if (items.length >= 20) break
     }
     items.reverse()
-    return { seq, items }
+    return { seq, bseq: b.bseq, items: [...items, ...b.items] }
   }
 
   // ---------- HTTP ----------
@@ -475,7 +478,7 @@ export function createChat(dataDir, log = console, opts = {}) {
         if (p === '/api/chat/bootstrap') return json(res, 200, bootstrap(q.get('user'))), true
         if (p === '/api/chat/history') return json(res, 200, history(q.get('user'), q.get('channel'), Number(q.get('before')) || 0, q.get('limit'))), true
         if (p === '/api/chat/search') return json(res, 200, search(q.get('user'), q.get('q') || '', q.get('channel') || '', q.get('machine') || '')), true
-        if (p === '/api/notify/poll') return json(res, 200, notifyPoll(q.get('user'), q.get('since'))), true
+        if (p === '/api/notify/poll') return json(res, 200, notifyPoll(q.get('user'), q.get('since'), q.get('bsince'))), true
         if (p === '/api/users') return json(res, 200, getUsers()), true
       } else if (method === 'POST') {
         if (p === '/api/chat/messages') return json(res, 201, postMessage(await readJson(req))), true
@@ -493,6 +496,17 @@ export function createChat(dataDir, log = console, opts = {}) {
     return true
   }
 
+  /** za druge module (tablo): oddaj dogodek vsem odprtim SSE povezavam */
+  function broadcast(name, payload) {
+    for (const c of clients) {
+      try {
+        c.res.write(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
+      } catch {
+        clients.delete(c)
+      }
+    }
+  }
+
   function close() {
     clearInterval(pingTimer)
     flushReads()
@@ -506,5 +520,5 @@ export function createChat(dataDir, log = console, opts = {}) {
     clients.clear()
   }
 
-  return { handle, close, flushReads, postMessage, setDone, markRead, bootstrap, history, search, notifyPoll, getUsers, get seq() { return seq }, paths: { logPath, readsPath }, clientCount: () => clients.size }
+  return { broadcast, userById, setBoardNotify: (f) => { boardNotify = f }, handle, close, flushReads, postMessage, setDone, markRead, bootstrap, history, search, notifyPoll, getUsers, get seq() { return seq }, paths: { logPath, readsPath }, clientCount: () => clients.size }
 }

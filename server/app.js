@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createStore } from './store.js'
 import { createChat } from './chat.js'
+import { createBoard } from './board.js'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -86,6 +87,8 @@ export function createApp({ dataDir, distDir, log = console, offsiteDir = '' }) 
   const store = createStore(dataDir, log, offsiteDir)
   store.readDb() // preveri db.json ob zagonu (pokvarjen -> db.corrupt-*.json)
   const chat = createChat(dataDir, log) // klepet: loceni datoteki v data/chat/, db.json le bere
+  const board = createBoard(dataDir, log, { userById: chat.userById, broadcast: chat.broadcast }) // Kaj se mudi: data/board.json
+  chat.setBoardNotify(board.notify)
 
   const server = http.createServer(async (req, res) => {
     const method = req.method || 'GET'
@@ -94,6 +97,7 @@ export function createApp({ dataDir, distDir, log = console, offsiteDir = '' }) 
 
     try {
       if (await chat.handle(req, res, url)) return
+      if (await board.handle(req, res, url)) return
 
       if (pathname === '/api/data' && method === 'GET') {
         send(res, 200, store.readDb(), {
@@ -135,5 +139,5 @@ export function createApp({ dataDir, distDir, log = console, offsiteDir = '' }) 
 
   server.on('close', () => chat.close())
 
-  return { server, store, chat }
+  return { server, store, chat, board }
 }
