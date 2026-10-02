@@ -66,6 +66,10 @@ function As-List($x) {
   return @($x)
 }
 
+function To-Long($v) {
+  try { return [long]$v } catch { return [long]0 }
+}
+
 function Parse-Json([string]$text) {
   # Windows PowerShell 5.1: JavaScriptSerializer brez omejitve velikosti (db.json je lahko velik)
   $ser = $null
@@ -161,7 +165,7 @@ function Get-NotifEvents($data, [string]$userId, [string]$fallbackRole, [string]
 
 # ---------------------------------------------------------------- konfiguracija in stanje
 function Get-Config {
-  $cfg = @{ serverUrl = 'http://192.168.1.124:8787'; userId = ''; userName = ''; role = 'delavec'; pollSeconds = 30; toastAppId = '' }
+  $cfg = @{ serverUrl = 'http://192.168.1.124:8787'; userId = ''; userName = ''; role = 'delavec'; pollSeconds = 30; chatPollSeconds = 4; toastAppId = '' }
   if (Test-Path -LiteralPath $ConfigPath) {
     try {
       $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -170,6 +174,7 @@ function Get-Config {
       if ($raw.userName) { $cfg.userName = [string]$raw.userName }
       if ($raw.role) { $cfg.role = [string]$raw.role }
       if ($raw.pollSeconds) { $cfg.pollSeconds = [Math]::Max(10, [int]$raw.pollSeconds) }
+      if ($raw.chatPollSeconds) { $cfg.chatPollSeconds = [Math]::Max(2, [int]$raw.chatPollSeconds) }
       if ($raw.toastAppId) { $cfg.toastAppId = [string]$raw.toastAppId }
     } catch { Write-Log ('Napaka v config.json: ' + $_) }
   }
@@ -177,12 +182,15 @@ function Get-Config {
 }
 
 function Get-State {
-  $st = @{ lastSeenAt = ''; userId = ''; notifiedIds = (New-Object System.Collections.ArrayList) }
+  $st = @{ lastSeenAt = ''; userId = ''; chatUser = ''; chatSeq = -1; boardSeq = -1; notifiedIds = (New-Object System.Collections.ArrayList) }
   if (Test-Path -LiteralPath $script:StatePath) {
     try {
       $s = Get-Content -LiteralPath $script:StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
       if ($s.lastSeenAt) { $st.lastSeenAt = To-Iso $s.lastSeenAt }
       if ($s.userId) { $st.userId = [string]$s.userId }
+      if ($s.chatUser) { $st.chatUser = [string]$s.chatUser }
+      if ($null -ne $s.chatSeq) { $st.chatSeq = To-Long $s.chatSeq }
+      if ($null -ne $s.boardSeq) { $st.boardSeq = To-Long $s.boardSeq }
       foreach ($x in @(As-List $s.notifiedIds)) { [void]$st.notifiedIds.Add([string]$x) }
     } catch { Write-Log ('Napaka v stanju (ponovno semenjenje): ' + $_) }
   }
@@ -193,7 +201,7 @@ function Save-State($st) {
   try {
     if (-not (Test-Path -LiteralPath $script:DataDir)) { New-Item -ItemType Directory -Path $script:DataDir -Force | Out-Null }
     $ids = @($st.notifiedIds | Select-Object -Last 200)
-    $obj = @{ lastSeenAt = $st.lastSeenAt; userId = $st.userId; notifiedIds = $ids; updatedAt = (To-Iso (Get-Date)) }
+    $obj = @{ lastSeenAt = $st.lastSeenAt; userId = $st.userId; chatUser = $st.chatUser; chatSeq = $st.chatSeq; boardSeq = $st.boardSeq; notifiedIds = $ids; updatedAt = (To-Iso (Get-Date)) }
     ($obj | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $script:StatePath -Encoding UTF8
   } catch { Write-Log ('Shranjevanje stanja ni uspelo: ' + $_) }
 }
@@ -346,8 +354,10 @@ function Show-Balloon([string]$Title, [string]$Body) {
 }
 
 # Pokaže obvestilo: toast; ce ne gre -> balloon + zvok. Vrne rezultat toasta.
-function Show-Notification([string]$Title, [string]$Body, [bool]$Urgent) {
-  $r = Show-Toast $Title $Body $Urgent $script:Cfg.serverUrl
+function Show-Notification([string]$Title, [string]$Body, [bool]$Urgent, [string]$Url = '') {
+  if (-not $Url) { $Url = $script:Cfg.serverUrl + '/' }
+  $script:LastUrl = $Url
+  $r = Show-Toast $Title $Body $Urgent $Url
   if ($r -eq 'ok') {
     Write-Log ('TOAST: ' + $Title + ' | ' + $Body)
   } else {
@@ -358,8 +368,9 @@ function Show-Notification([string]$Title, [string]$Body, [bool]$Urgent) {
   return $r
 }
 
-function Open-App {
-  $url = $script:Cfg.serverUrl + '/'
+function Open-App([string]$Url = '') {
+  $url = $Url
+  if (-not $url) { $url = $script:Cfg.serverUrl + '/' }
   try { Start-Process $url } catch {
     Write-Log ('Odpiranje brskalnika ni uspelo: ' + $_)
     try { Start-Process 'cmd.exe' -ArgumentList ('/c start "" "' + $url + '"') -WindowStyle Hidden } catch { }
@@ -413,6 +424,79 @@ function Handle-PollText([string]$text) {
   if ([string]::CompareOrdinal($mx, $st.lastSeenAt) -gt 0) { $st.lastSeenAt = $mx }
   Save-State $st
   $script:LastHash = $key
+}
+
+# ---------------------------------------------------------------- klepet + "Kaj se mudi" (GET /api/notify/poll)
+# Naslov poizvedbe: brez since/bsince = prvi zagon (streznik vrne samo trenutna stevca, nobenih toastov).
+function Get-ChatPollUrl {
+  $cfg = $script:Cfg
+  $st = $script:State
+  $u = $cfg.serverUrl + '/api/notify/poll?user=' + [System.Uri]::EscapeDataString([string]$cfg.userId)
+  if ($st.chatUser -eq $cfg.userId -and $st.chatSeq -ge 0 -and $st.boardSeq -ge 0) {
+    $u += '&since=' + $st.chatSeq + '&bsince=' + $st.boardSeq
+  }
+  return $u
+}
+
+function Format-ChatBody($it) {
+  $b = [string](Get-Prop $it 'body')
+  $m = [string](Get-Prop $it 'machine')
+  if ($m) { $b = '[' + $m + '] ' + $b }
+  return $b
+}
+
+# Obdela odgovor /api/notify/poll. Vrne stevilo prikazanih obvestil (za teste).
+function Handle-ChatPollText([string]$text) {
+  $r = Parse-Json $text
+  if ($null -eq $r) { return 0 }
+  $cfg = $script:Cfg
+  $st = $script:State
+  $seq = To-Long (Get-Prop $r 'seq')
+  $bseq = To-Long (Get-Prop $r 'bseq')
+
+  # prvi zagon (ali drug uporabnik): samo si zapomni stevca, brez obvestil
+  if ($st.chatUser -ne $cfg.userId -or $st.chatSeq -lt 0 -or $st.boardSeq -lt 0) {
+    $st.chatUser = $cfg.userId
+    $st.chatSeq = $seq
+    $st.boardSeq = $bseq
+    Save-State $st
+    Write-Log ('Klepet: prvo branje, seq=' + $seq + ', mudi=' + $bseq + ' (brez obvestil).')
+    return 0
+  }
+  # streznik je dobil prazno bazo / manjsi stevec: nadaljuj od novega stanja
+  if ($seq -lt $st.chatSeq) { Write-Log ('Klepet: seq se je zmanjsal (' + $st.chatSeq + ' -> ' + $seq + ').'); $st.chatSeq = $seq }
+  if ($bseq -lt $st.boardSeq) { $st.boardSeq = $bseq }
+
+  $fresh = New-Object System.Collections.ArrayList
+  foreach ($it in @(As-List (Get-Prop $r 'items'))) {
+    $kind = [string](Get-Prop $it 'kind')
+    $s = To-Long (Get-Prop $it 'seq')
+    if ($kind -eq 'board') { if ($s -le $st.boardSeq) { continue } }
+    else { if ($s -le $st.chatSeq) { continue } }
+    [void]$fresh.Add($it)
+  }
+  $muted = ($script:MutedUntil -gt (Get-Date))
+  $shown = 0
+  if ($fresh.Count -gt 0 -and -not $muted) {
+    foreach ($it in $fresh) {
+      if ($shown -ge 4) { break }
+      $url = [string](Get-Prop $it 'url')
+      if ($url) { $url = $cfg.serverUrl + $url } else { $url = $cfg.serverUrl + '/' }
+      $urgent = [bool](Get-Prop $it 'nujno')
+      [void](Show-Notification ([string](Get-Prop $it 'title')) (Format-ChatBody $it) $urgent $url)
+      $shown++
+    }
+    if ($fresh.Count -gt $shown) {
+      $rest = $fresh.Count - $shown
+      [void](Show-Notification 'Nabava' ('Še ' + $rest + ' novih sporočil.') $false ($cfg.serverUrl + '/#/klepet'))
+      $shown++
+    }
+  }
+  if ($fresh.Count -gt 0 -and $muted) { Write-Log ('Klepet: ' + $fresh.Count + ' novih med utišanjem (brez toastov).') }
+  $st.chatSeq = $seq
+  $st.boardSeq = $bseq
+  Save-State $st
+  return $shown
 }
 
 # ---------------------------------------------------------------- tray
@@ -471,6 +555,10 @@ function Start-TrayApp {
   $script:MutedUntil = [datetime]::MinValue
   $script:NextPoll = Get-Date
   $script:PollTask = $null
+  $script:ChatTask = $null
+  $script:NextChat = Get-Date
+  $script:ChatFault = ''
+  $script:LastUrl = ''
 
   $script:IconOn = [System.Drawing.Icon]::FromHandle((New-AppBitmap 32 ([System.Drawing.Color]::FromArgb(42, 95, 143)) 'N').GetHicon())
   $script:IconMuted = [System.Drawing.Icon]::FromHandle((New-AppBitmap 32 ([System.Drawing.Color]::FromArgb(130, 130, 130)) 'N').GetHicon())
@@ -498,7 +586,7 @@ function Start-TrayApp {
 
   $miOpen.add_Click({ try { Open-App } catch { Write-Log ('Odpri: ' + $_) } })
   $script:Tray.add_DoubleClick({ try { Open-App } catch { Write-Log ('Odpri: ' + $_) } })
-  $script:Tray.add_BalloonTipClicked({ try { Open-App } catch { Write-Log ('Balloon klik: ' + $_) } })
+  $script:Tray.add_BalloonTipClicked({ try { Open-App $script:LastUrl } catch { Write-Log ('Balloon klik: ' + $_) } })
   $script:MenuMute.add_Click({
     try { Set-Mute ($script:MutedUntil -le (Get-Date)) } catch { Write-Log ('Utišaj: ' + $_) }
   })
@@ -526,6 +614,24 @@ function Start-TrayApp {
     try {
       $now = Get-Date
       if ($script:MutedUntil -ne [datetime]::MinValue -and $script:MutedUntil -le $now) { Set-Mute $false }
+      # klepet / Kaj se mudi: kratka poizvedba (privzeto 4 s), tece tudi med utisanjem (samo prestavi stevce)
+      if ($script:ChatTask) {
+        if ($script:ChatTask.IsCompleted) {
+          $ct = $script:ChatTask
+          $script:ChatTask = $null
+          if ($ct.IsFaulted -or $ct.IsCanceled) {
+            $why = 'prekinitev'
+            if ($ct.Exception) { $why = $ct.Exception.GetBaseException().Message }
+            if ($why -ne $script:ChatFault) { Write-Log ('Klepet poll napaka: ' + $why); $script:ChatFault = $why }
+          } else {
+            if ($script:ChatFault) { Write-Log 'Klepet poll spet deluje.'; $script:ChatFault = '' }
+            try { [void](Handle-ChatPollText ([string]$ct.Result)) } catch { Write-Log ('Klepet obdelava: ' + $_) }
+          }
+        }
+      } elseif ($now -ge $script:NextChat) {
+        $script:NextChat = $now.AddSeconds($script:Cfg.chatPollSeconds)
+        $script:ChatTask = $script:Http.GetStringAsync((Get-ChatPollUrl))
+      }
       if ($script:PollTask) {
         if ($script:PollTask.IsCompleted) {
           $t = $script:PollTask
