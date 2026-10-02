@@ -875,8 +875,8 @@ label.field {
   grid-template-columns: 1fr;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
-  height: calc(100dvh - 250px);
-  min-height: 420px;
+  height: calc(100dvh - 300px);
+  min-height: 380px;
 }
 .chat-nav { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .chat-ch-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }

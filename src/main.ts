@@ -351,7 +351,7 @@ function shell(content: string) {
       </div>
     </header>
     <nav class="tabs ${tabs.length > 3 ? 'tabs-4' : ''}" aria-label="Glavni meni">${tabsHtml}</nav>
-    ${howtoPanel()}
+    ${tab === 'klepet' ? '' : howtoPanel()}
     <main>${content}</main>
   `
   app.querySelector('[data-action="logout"]')?.addEventListener('click', logout)
