@@ -10,7 +10,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8'))
 }
 
 const NOTES =
-  '1.2.2: popravek namestitve obvestil na Windows PowerShell 5.1 (napaka Contains), varovalka pri namestitvi strežnika. LAN :8787.'
+  '1.3.0: nov zavihek Klepet (Splošno, Plani, Nujno, Razno + zasebni pogovori), sporočila v živo, oznaka stroja, kljukica, iskanje. Podatki klepeta so ločeni od db.json.'
 
 function versionJsonPlugin(): Plugin {
   return {

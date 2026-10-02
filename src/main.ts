@@ -12,6 +12,7 @@ import {
   findWorkstation,
 } from './data.ts'
 import { createUser, findUserByName } from './auth.ts'
+import { chatHidden, chatSaveUi, chatSelect, chatUnreadTotal, mountChat, setChatHooks, startChat, stopChat } from './chat.ts'
 import { downloadExcelCsv, downloadWordDoc, stamp } from './export.ts'
 import { fileToDataUrl } from './image.ts'
 import {
@@ -106,6 +107,7 @@ function stopScan() {
 
 function logout() {
   stopScan()
+  stopChat()
   session = null
   saveSession(null)
   authView = 'pick'
@@ -171,6 +173,7 @@ function suggestSuppliers(category?: string, title?: string): SupplierRecord[] {
 
 function render() {
   stopScan()
+  chatSaveUi()
   if (!session) {
     renderAuth()
     return
@@ -179,6 +182,7 @@ function render() {
     logout()
     return
   }
+  if (isServerMode()) startChat({ id: session.userId, name: session.displayName })
   renderApp()
 }
 
@@ -303,12 +307,16 @@ function shell(content: string) {
     ['servisi', '⚙', 'Servisi', 'Okuma'],
     ['zgodovina', '▤', 'Zgodovina', 'Arhiv'],
   ]
+  if (isServerMode()) tabs.push(['klepet', '✉', 'Klepet', 'Sporočila'])
   const tabsHtml = tabs
     .map(([id, icon, label, hintTab]) => {
+      const chatN = chatUnreadTotal()
       const countHtml =
         id === 'nabava' && count > 0
           ? `<span class="tab-count ${nujnoClass}">${count}</span>`
-          : ''
+          : id === 'klepet'
+            ? `<span class="tab-count" data-chat-badge${chatN > 0 ? '' : ' hidden'}>${chatN}</span>`
+            : ''
       return `<button class="tab tab-${id} ${tab === id ? 'active' : ''}" type="button" data-tab="${id}">
           <span class="tab-icon">${icon}</span>
           <span class="tab-label">${label}</span>
@@ -342,7 +350,7 @@ function shell(content: string) {
         <button class="btn btn-ghost" type="button" data-action="logout">Odjava</button>
       </div>
     </header>
-    <nav class="tabs" aria-label="Glavni meni">${tabsHtml}</nav>
+    <nav class="tabs ${tabs.length > 3 ? 'tabs-4' : ''}" aria-label="Glavni meni">${tabsHtml}</nav>
     ${howtoPanel()}
     <main>${content}</main>
   `
@@ -1298,9 +1306,17 @@ function renderApp() {
   let content = ''
   if (tab === 'nabava') content = renderNabava()
   else if (tab === 'servisi') content = renderServisi()
+  else if (tab === 'klepet' && isServerMode()) content = '<div id="chat-slot"></div>'
   else content = renderZgodovina()
 
   shell(content)
+
+  const chatSlot = app.querySelector<HTMLElement>('#chat-slot')
+  if (chatSlot) {
+    mountChat(chatSlot)
+    return
+  }
+  chatHidden()
 
   if (tab === 'nabava') {
     if (detailRequestId) {
@@ -1395,6 +1411,12 @@ async function applyPolledData(next: typeof data, opts?: { silent?: boolean }) {
   // Browser toast when tab may be hidden / background
   await notifyNewEvents(events, true)
 
+  if (tab === 'klepet') {
+    // klepet ima lasten DOM; ne rušimo ga zaradi novih zahtev v ozadju
+    updateBadgeDom()
+    return
+  }
+
   const fillingForm = !!app.querySelector('#req-form input[name="title"]') &&
     !!(app.querySelector<HTMLInputElement>('#req-form input[name="title"]')?.value.trim())
   if (fillingForm) {
@@ -1440,6 +1462,14 @@ function startPolling() {
   })
 }
 
+function applyHash(): boolean {
+  const m = /^#\/klepet(?:\/(.+))?$/.exec(location.hash)
+  if (!m || !isServerMode()) return false
+  tab = 'klepet'
+  if (m[1]) chatSelect(decodeURIComponent(m[1]))
+  return true
+}
+
 async function bootstrap() {
   app.innerHTML = `<div class="login-hero"><div class="logo">NO</div><p class="muted">Nalagam…</p></div>`
   try {
@@ -1448,7 +1478,21 @@ async function bootstrap() {
     data = emptyData()
   }
   lastFingerprint = requestsFingerprint(data)
+  setChatHooks({
+    badge: (n) => {
+      const el = document.querySelector<HTMLElement>('[data-chat-badge]')
+      if (el) {
+        el.textContent = String(n)
+        el.hidden = n <= 0
+      }
+    },
+    incoming: (title, text) => showToast(`${title}: ${text.length > 80 ? text.slice(0, 77) + '…' : text}`),
+  })
+  applyHash()
   render()
+  window.addEventListener('hashchange', () => {
+    if (session && applyHash()) render()
+  })
   void checkForUpdate(false)
   void registerServiceWorker()
   startPolling()

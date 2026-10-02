@@ -39,6 +39,21 @@ paket\obvestila\ (nabava-obvestila.ps1, namesti-/odstrani-obvestila.ps1)
 - `db.prev.json` = predhodna veljavna različica pred vsakim PUT,
 - API (`GET/PUT /api/data`) in oblika `db.json` nespremenjena. Testi: `bun run test` (`node --test`).
 
+## Klepet (v1.3.0, `server/chat.js`, `src/chat.ts`)
+
+- Zavihek **Klepet** (samo v LAN načinu): kanali Splošno, Plani, Nujno, Razno + zasebni 1:1 (seznam oseb iz `db.json` users[]).
+  Delavec izbere ime enkrat (obstoječa prijava, shranjena v brskalniku).
+- Sporočila v živo prek **SSE** (`GET /api/chat/events?user=ID`, ob izpadu `Last-Event-ID` ponovi zamujeno).
+- Oznaka stroja (Okuma …), kljukica »opravljeno« na sporočilu, iskanje (brez šumnikov), neprebrano + značka na zavihku, zvok.
+- **Shramba (ločeno od `db.json`, ki ga klepet samo bere):** `data/chat/messages.jsonl` (dodajalni dnevnik, ena vrstica = en dogodek),
+  `data/chat/reads.json` (preberi-stanje). Brez SQLite. Ob zagonu se jsonl prebere v pomnilnik; pokvarjena vrstica se preskoči.
+- API: `GET /api/chat/bootstrap|history|search|events`, `POST /api/chat/messages|done|read`, `GET /api/users`.
+- **Za notifier:** `GET /api/notify/poll?user=ID&since=SEQ` → `{seq, items:[{seq,title,body,machine,nujno,url,…}]}`.
+  Prvi klic brez `since` vrne samo trenutni `seq` (nato si ga notifier zapomni). Notifier 1.2.2 tega še ne uporablja.
+- Identiteta ni preverjena z geslom (kot v celotni aplikaciji): zasebni pogovori so zasebni v aplikaciji, ne kriptografsko.
+- Testi: `server/test/chat.test.js`; brskalniški preizkus: `node deploy/lan/tests/smoke-chat.mjs` (puppeteer-core + Chrome, glej glavo datoteke).
+- **Posodobitev strežnika na Oro455:** razširi nov ZIP, dvoklik `NAMESTI-STREZNIK.bat` (podatki in kopije ostanejo; ustavi star strežnik, zamenja dist+server, znova zažene).
+
 ## Obvestila (tray)
 
 `nabava-obvestila.ps1`: ikona v opravilni vrstici (Odpri / Utišaj 1 h / Preizkusni toast / Izhod), poizvedba

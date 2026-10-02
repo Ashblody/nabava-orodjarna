@@ -455,7 +455,7 @@ export function createChat(dataDir, log = console, opts = {}) {
         sendTo(c, eventPayload(ev), ev.t === 'msg' ? 'message' : 'done')
       }
     } else {
-      res.write(`event: hello\ndata: ${JSON.stringify({ seq })}\n\n`)
+      res.write(`id: ${seq}\nevent: hello\ndata: ${JSON.stringify({ seq })}\n\n`)
     }
     clients.add(c)
     const drop = () => clients.delete(c)
