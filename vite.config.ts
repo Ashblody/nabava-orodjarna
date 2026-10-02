@@ -10,7 +10,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8'))
 }
 
 const NOTES =
-  'Obvestila: in-app badge, brskalnik (Vklopi obvestila), Windows toast notifier. LAN :8787.'
+  '1.2.1: varnostne kopije podatkov, tray obvestila za Windows (nov namestitveni paket). LAN :8787.'
 
 function versionJsonPlugin(): Plugin {
   return {
