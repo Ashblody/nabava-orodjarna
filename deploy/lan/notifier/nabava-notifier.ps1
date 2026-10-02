@@ -1,105 +1,96 @@
-# Nabava Orodjarna — Windows toast companion (Win10+ WinRT, no BurntToast)
-# Polls /api/data and shows toast on new vodja-relevant (or all) requests.
+# Nabava Orodjarna — Windows toast notifier (Win10+, brez BurntToast)
+# Zaženi prek start-notifier.bat (VBS ni potreben).
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigPath = Join-Path $ScriptDir 'notifier-config.json'
-
-$DefaultConfig = @{
-  apiUrl      = 'http://192.168.1.124:8787/api/data'
-  pollSeconds = 30
-  role        = 'vodja'  # vodja | all
-}
-
-function Read-Config {
-  if (Test-Path -LiteralPath $ConfigPath) {
-    try {
-      $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-      return @{
-        apiUrl      = if ($raw.apiUrl) { [string]$raw.apiUrl } else { $DefaultConfig.apiUrl }
-        pollSeconds = if ($raw.pollSeconds) { [int]$raw.pollSeconds } else { $DefaultConfig.pollSeconds }
-        role        = if ($raw.role) { [string]$raw.role } else { $DefaultConfig.role }
-      }
-    } catch {
-      Write-Warning "Config berljiv z napako, uporabljam privzeto: $_"
-    }
-  }
-  return $DefaultConfig.Clone()
-}
-
 $StateDir = Join-Path $env:LOCALAPPDATA 'NabavaOrodjarna'
 $StatePath = Join-Path $StateDir 'notifier-state.json'
 
-function Read-State {
+function Get-Config {
+  $apiUrl = 'http://192.168.1.124:8787/api/data'
+  $pollSeconds = 30
+  $role = 'vodja'
+  if (Test-Path -LiteralPath $ConfigPath) {
+    try {
+      $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      if ($raw.apiUrl) { $apiUrl = [string]$raw.apiUrl }
+      if ($raw.pollSeconds) { $pollSeconds = [int]$raw.pollSeconds }
+      if ($raw.role) { $role = [string]$raw.role }
+    } catch {
+      Write-Host "Config napaka, privzeto: $_"
+    }
+  }
+  return @{ apiUrl = $apiUrl; pollSeconds = $pollSeconds; role = $role }
+}
+
+function Get-State {
   if (-not (Test-Path -LiteralPath $StatePath)) {
-    return @{ lastSeenAt = $null; notifiedIds = @() }
+    return @{ lastSeenAt = ''; notifiedIds = New-Object System.Collections.ArrayList }
   }
   try {
     $s = Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $ids = @()
-    if ($s.notifiedIds) { $ids = @($s.notifiedIds | ForEach-Object { [string]$_ }) }
-    return @{
-      lastSeenAt   = if ($s.lastSeenAt) { [string]$s.lastSeenAt } else { $null }
-      notifiedIds  = $ids
+    $list = New-Object System.Collections.ArrayList
+    if ($s.notifiedIds) {
+      foreach ($x in @($s.notifiedIds)) { [void]$list.Add([string]$x) }
     }
+    $ls = ''
+    if ($s.lastSeenAt) { $ls = [string]$s.lastSeenAt }
+    return @{ lastSeenAt = $ls; notifiedIds = $list }
   } catch {
-    return @{ lastSeenAt = $null; notifiedIds = @() }
+    return @{ lastSeenAt = ''; notifiedIds = New-Object System.Collections.ArrayList }
   }
 }
 
-function Write-State($state) {
+function Save-State($state) {
   if (-not (Test-Path -LiteralPath $StateDir)) {
     New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
   }
   $ids = @($state.notifiedIds | Select-Object -Last 200)
-  $obj = [ordered]@{
-    lastSeenAt  = $state.lastSeenAt
+  $obj = @{
+    lastSeenAt = $state.lastSeenAt
     notifiedIds = $ids
-    updatedAt   = (Get-Date).ToUniversalTime().ToString('o')
+    updatedAt = (Get-Date).ToUniversalTime().ToString('o')
   }
   ($obj | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $StatePath -Encoding UTF8
 }
 
-function Show-Toast {
-  param(
-    [string]$Title,
-    [string]$Body,
-    [string]$Tag
-  )
-  try {
-    $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
-    $null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime]
+function Escape-Xml([string]$t) {
+  if ($null -eq $t) { return '' }
+  return ($t -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;' -replace '"','&quot;')
+}
 
-    $appId = 'NabavaOrodjarna.Notifier'
-    $xml = @"
-<toast>
-  <visual>
-    <binding template="ToastGeneric">
-      <text>$([System.Security.SecurityElement]::Escape($Title))</text>
-      <text>$([System.Security.SecurityElement]::Escape($Body))</text>
-    </binding>
-  </visual>
-</toast>
-"@
+function Show-Toast([string]$Title, [string]$Body) {
+  $ok = $false
+  try {
+    [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+    [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
+    $t1 = Escape-Xml $Title
+    $t2 = Escape-Xml $Body
+    $xmlText = '<toast><visual><binding template="ToastGeneric"><text>' + $t1 + '</text><text>' + $t2 + '</text></binding></visual></toast>'
     $doc = New-Object Windows.Data.Xml.Dom.XmlDocument
-    $doc.LoadXml($xml)
+    $doc.LoadXml($xmlText)
     $toast = [Windows.UI.Notifications.ToastNotification]::new($doc)
-    if ($Tag) { $toast.Tag = $Tag; $toast.Group = 'nabava' }
-    $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId)
-    $notifier.Show($toast)
+    $n = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('NabavaOrodjarna.Notifier')
+    $n.Show($toast)
+    $ok = $true
   } catch {
-    # Fallback balloon via NotifyIcon-less Message — last resort console beep
-    Write-Host "[TOAST FAIL] $Title — $Body ($_)"
+    Write-Host ('Toast WinRT fail: ' + $_)
+  }
+  if (-not $ok) {
     try {
-      Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
-      # Use tray balloon if possible via temporary notify icon
+      Add-Type -AssemblyName System.Windows.Forms
+      Add-Type -AssemblyName System.Drawing
       $ni = New-Object System.Windows.Forms.NotifyIcon
       $ni.Icon = [System.Drawing.SystemIcons]::Information
       $ni.Visible = $true
-      $ni.ShowBalloonTip(5000, $Title, $Body, [System.Windows.Forms.ToolTipIcon]::Info)
-      Start-Sleep -Milliseconds 600
+      $ni.BalloonTipTitle = $Title
+      $ni.BalloonTipText = $Body
+      $ni.ShowBalloonTip(5000)
+      Start-Sleep -Seconds 1
       $ni.Dispose()
     } catch {
+      Write-Host ('Balloon fail: ' + $_)
       [Console]::Beep(880, 200)
     }
   }
@@ -110,89 +101,67 @@ function Get-ApiData([string]$url) {
   return ($resp.Content | ConvertFrom-Json)
 }
 
-function Find-Events($data, $sinceIso, $role) {
-  $since = if ($sinceIso) { $sinceIso } else { '1970-01-01T00:00:00.000Z' }
-  $events = @()
-  if (-not $data.requests) { return $events }
+Write-Host 'Nabava Orodjarna notifier'
+$cfg = Get-Config
+Write-Host ('  API:  ' + $cfg.apiUrl)
+Write-Host ('  Role: ' + $cfg.role + '  Poll: ' + $cfg.pollSeconds + 's')
+Write-Host ('  State: ' + $StatePath)
+Write-Host 'Okno lahko ostane odprto. Zaustavi: Ctrl+C ali zapri okno.'
+Write-Host ''
 
-  foreach ($r in $data.requests) {
-    $created = [string]$r.createdAt
-    $status = [string]$r.status
-    $urgency = [string]$r.urgency
-    $title = [string]$r.title
-    $by = [string]$r.createdBy
-    $id = [string]$r.id
-
-    $isNewOpen = ($created -gt $since) -and ($status -eq 'odprto' -or $status -eq 'naroceno')
-    if (-not $isNewOpen) { continue }
-
-    if ($role -eq 'vodja' -or $role -eq 'all') {
-      $nujno = if ($urgency -eq 'visoka') { ' · NUJNO' } else { '' }
-      $events += [pscustomobject]@{
-        Id    = "new:${id}:${created}"
-        At    = $created
-        Title = "Nova zahteva$nujno"
-        Body  = "$title · $by"
-        Nujno = ($urgency -eq 'visoka')
-      }
-    }
-  }
-
-  # Sort newest first
-  return @($events | Sort-Object At -Descending)
-}
-
-Write-Host "Nabava Orodjarna notifier"
-$cfg = Read-Config
-Write-Host "  API:  $($cfg.apiUrl)"
-Write-Host "  Role: $($cfg.role)  Poll: $($cfg.pollSeconds)s"
-Write-Host "  State: $StatePath"
-Write-Host "Ctrl+C za zaustavitev.`n"
-
-$state = Read-State
-# First successful fetch seeds lastSeen without flooding toasts
+$state = Get-State
 $seeded = $false
 
 while ($true) {
   try {
-    $cfg = Read-Config
+    $cfg = Get-Config
     $data = Get-ApiData $cfg.apiUrl
 
-    if (-not $seeded -and -not $state.lastSeenAt) {
-      $state.lastSeenAt = (Get-Date).ToUniversalTime().ToString('o')
-      Write-State $state
+    if (-not $seeded) {
+      if (-not $state.lastSeenAt) {
+        $state.lastSeenAt = (Get-Date).ToUniversalTime().ToString('o')
+        Save-State $state
+        Write-Host ((Get-Date -Format 'HH:mm:ss') + ' Semenjeno (stare zahteve brez toasta).')
+      }
       $seeded = $true
-      Write-Host "$(Get-Date -Format 'HH:mm:ss') Semenjeno (brez toastov za staro zgodovino)."
     } else {
-      $seeded = $true
-      $events = Find-Events $data $state.lastSeenAt $cfg.role
+      $since = $state.lastSeenAt
+      if (-not $since) { $since = '1970-01-01T00:00:00.000Z' }
       $fresh = @()
-      foreach ($ev in $events) {
-        if ($state.notifiedIds -notcontains $ev.Id) { $fresh += $ev }
-      }
-
-      if ($fresh.Count -gt 0) {
-        $maxShow = 5
-        $i = 0
-        foreach ($ev in $fresh) {
-          if ($i -ge $maxShow) { break }
-          Show-Toast -Title $ev.Title -Body $ev.Body -Tag $ev.Id
-          $state.notifiedIds += $ev.Id
-          Write-Host "$(Get-Date -Format 'HH:mm:ss') TOAST: $($ev.Title) — $($ev.Body)"
-          $i++
+      if ($data.requests) {
+        foreach ($r in @($data.requests)) {
+          $created = [string]$r.createdAt
+          $status = [string]$r.status
+          $urgency = [string]$r.urgency
+          $title = [string]$r.title
+          $by = [string]$r.createdBy
+          $id = [string]$r.id
+          $eid = 'new:' + $id + ':' + $created
+          if ($created -le $since) { continue }
+          if ($status -ne 'odprto' -and $status -ne 'naroceno') { continue }
+          if ($cfg.role -ne 'vodja' -and $cfg.role -ne 'all') { continue }
+          if ($state.notifiedIds -contains $eid) { continue }
+          $nujno = ''
+          if ($urgency -eq 'visoka') { $nujno = ' NUJNO' }
+          $fresh += [pscustomobject]@{ Id = $eid; At = $created; Title = ('Nova zahteva' + $nujno); Body = ($title + ' - ' + $by) }
         }
-        # Advance lastSeen to newest event time so we don't re-scan forever
-        $newest = ($fresh | Sort-Object At -Descending | Select-Object -First 1).At
-        if ($newest -and $newest -gt $state.lastSeenAt) {
-          $state.lastSeenAt = $newest
-        }
-        Write-State $state
       }
+      $fresh = @($fresh | Sort-Object At -Descending)
+      $i = 0
+      foreach ($ev in $fresh) {
+        if ($i -ge 5) { break }
+        Show-Toast $ev.Title $ev.Body
+        [void]$state.notifiedIds.Add($ev.Id)
+        Write-Host ((Get-Date -Format 'HH:mm:ss') + ' TOAST: ' + $ev.Title + ' - ' + $ev.Body)
+        if ($ev.At -gt $state.lastSeenAt) { $state.lastSeenAt = $ev.At }
+        $i++
+      }
+      if ($i -gt 0) { Save-State $state }
     }
   } catch {
-    Write-Host "$(Get-Date -Format 'HH:mm:ss') Napaka: $_"
+    Write-Host ((Get-Date -Format 'HH:mm:ss') + ' Napaka: ' + $_)
   }
-
-  $sec = [Math]::Max(10, [int]$cfg.pollSeconds)
+  $sec = 30
+  try { $sec = [Math]::Max(10, [int]$cfg.pollSeconds) } catch { $sec = 30 }
   Start-Sleep -Seconds $sec
 }
