@@ -236,7 +236,7 @@ function Install-Firewall([bool]$admin) {
 
 try {
   # preveri pakete
-  foreach ($need in @('node\node.exe', 'dist\index.html', 'server\index.js', 'server\app.js', 'server\store.js', 'server\chat.js', 'start-streznik.ps1')) {
+  foreach ($need in @('node\node.exe', 'dist\index.html', 'server\index.js', 'server\app.js', 'server\store.js', 'server\chat.js', 'server\board.js', 'start-streznik.ps1')) {
     if (-not (Test-Path -LiteralPath (Join-Path $here $need))) {
       Show-Msg ('V paketu manjka: ' + $need + $nl + 'Ali si ZIP razširil (desni klik > Razširi vse)? Poženi ponovno iz razširjene mape.') 'err'
       exit 1
