@@ -39,6 +39,19 @@ $ev = @(Get-NotifEvents $d 'u1' 'delavec' '2026-10-01T00:00:00.000Z')
 Check 'hashtable podatki' ($ev.Count -eq 1)
 Check 'To-Iso DateTime' ((To-Iso ([datetime]::Parse('2026-10-02T10:00:00Z').ToUniversalTime())) -eq '2026-10-02T10:00:00.000Z')
 
+# Dictionary<string,object> kot ga vrne JavaScriptSerializer v Windows PowerShell 5.1 (Contains() je tam "explicit" -> napaka v v1.2.0/1.2.1)
+$gd = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+$gd['id'] = 'u1'; $gd['name'] = 'Ana'
+Check 'Get-Prop: Dictionary<string,object> obstojec kljuc' ((Get-Prop $gd 'name') -eq 'Ana')
+Check 'Get-Prop: Dictionary<string,object> manjkajoc kljuc' ($null -eq (Get-Prop $gd 'ni'))
+Check 'Get-Prop: Hashtable' ((Get-Prop @{ a = 1 } 'a') -eq 1 -and $null -eq (Get-Prop @{ a = 1 } 'b'))
+Check 'Get-Prop: PSCustomObject' ((Get-Prop ([pscustomobject]@{ a = 5 }) 'a') -eq 5 -and $null -eq (Get-Prop ([pscustomobject]@{ a = 5 }) 'b'))
+# prava pot kot v namestitvi: Parse-Json (JavaScriptSerializer v 5.1) + Get-Prop
+$pj = Parse-Json $json
+Check 'Parse-Json + Get-Prop users' (@(As-List (Get-Prop $pj 'users')).Count -eq 2 -and (Get-Prop (@(As-List (Get-Prop $pj 'users'))[0]) 'name') -eq 'Janez Vodja')
+Check 'Parse-Json: Get-NotifEvents enak rezultat' (@(Get-NotifEvents $pj 'u1' 'delavec' '').Count -eq 2)
+Check 'Parse-Json: manjkajoc kljuc (workstationId) brez napake' ($null -eq (Get-Prop (@(As-List (Get-Prop $pj 'users'))[0]) 'workstationId'))
+
 # poskus XML-ja toasta ni mogoc brez Windows; preveri vsaj escape
 Check 'Escape-Xml' ((Escape-Xml 'a<b>&"c') -eq 'a&lt;b&gt;&amp;&quot;c')
 

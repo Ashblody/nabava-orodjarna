@@ -1,5 +1,6 @@
 ﻿# Nabava Orodjarna - namestitev STREZNIKA na ta PC (Oro455, 192.168.1.124). Zazene jo NAMESTI-STREZNIK.bat.
 # Vse lokalno: aplikacija + portable Node + podatki v eni mapi (privzeto C:\NabavaOrodjarna). Brez VBS.
+param([switch]$Prisili)   # -Prisili: preskoci varovalko 'to ni strezniski PC'
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -241,12 +242,30 @@ try {
       exit 1
     }
   }
+  # varovalka: streznik namestimo SAMO na PC z naslovom 192.168.1.124 (ostali PC-ji rabijo samo NAMESTI-OBVESTILA.bat)
+  $myIps = @()
+  try {
+    foreach ($ni in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+      if ($ni.OperationalStatus -ne 'Up') { continue }
+      foreach ($ua in $ni.GetIPProperties().UnicastAddresses) { if ($ua.Address.AddressFamily -eq 'InterNetwork') { $myIps += $ua.Address.ToString() } }
+    }
+  } catch { }
+  if (-not $Prisili -and ($myIps -notcontains '192.168.1.124')) {
+    $elsewhere = $false
+    try { [void](Get-Url 'http://192.168.1.124:8787/api/data' 4000); $elsewhere = $true } catch { }
+    if ($elsewhere) {
+      Show-Msg ('Strežnik že teče na PC 192.168.1.124. Ta PC (' + ($myIps -join ', ') + ') strežnika NE potrebuje.' + $nl + $nl +
+        'Za obvestila na tem PC dvoklikni NAMESTI-OBVESTILA.bat. Nič nisem spremenil.') 'info'
+      exit 0
+    }
+    $ans = [System.Windows.Forms.MessageBox]::Show('Ta PC nima naslova 192.168.1.124 (ima: ' + ($myIps -join ', ') + ').' + $nl + $nl +
+      'Strežnik se namešča samo na glavni PC. Res ga namestim TUKAJ?', $Title, [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning, [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
+    if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { exit 0 }
+  }
   $admin = Test-Admin
   $root = Select-Root
   $script:InstLog = Join-Path $root 'namesti.log'
   Log ('--- namestitev strezniska, mapa ' + $root + ', admin=' + $admin + ' ---')
-  New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
-  Set-Content -LiteralPath (Join-Path $markerDir 'streznik-mapa.txt') -Value $root -Encoding UTF8
 
   # ce tece star streznik (npr. prejsnja namestitev z drugimi podatki), vzemi podatke iz njega
   $oldJson = ''
@@ -296,6 +315,9 @@ try {
     try { [void](Get-Url ('http://127.0.0.1:' + $Port + '/api/data') 3000); $up = $true; break } catch { }
   }
   Log ('Streznik tece: ' + $up + '; zagon: ' + $how + '; firewall: ' + $fw)
+  # zapomni mapo (za ODSTRANI-STREZNIK.bat) sele, ko je namestitev prisla do konca
+  New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $markerDir 'streznik-mapa.txt') -Value $root -Encoding UTF8
 
   # naslovi
   $ips = @()

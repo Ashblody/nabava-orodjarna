@@ -43,7 +43,17 @@ function To-Iso($v) {
 function Get-Prop($o, [string]$name) {
   if ($null -eq $o) { return $null }
   if ($o -is [System.Collections.IDictionary]) {
-    if ($o.Contains($name)) { return $o[$name] }
+    # POZOR: JavaScriptSerializer vrne Dictionary<string,object>. Njegov Contains(object) je v .NET Framework
+    # (Windows PowerShell 5.1) "explicit interface" in ga PowerShell ne vidi -> napaka
+    # 'Cannot find an overload for "Contains"'. Zato NE uporabljaj .Contains(); uporabi TryGetValue / zanko po Keys.
+    $v = $null
+    if ($o -is [System.Collections.Generic.Dictionary[string, object]]) {
+      if ($o.TryGetValue($name, [ref]$v)) { return $v }
+      return $null
+    }
+    foreach ($k in @($o.Keys)) {
+      if ([string]$k -eq $name) { return $o[$k] }
+    }
     return $null
   }
   $p = $o.PSObject.Properties[$name]
@@ -261,8 +271,12 @@ function Show-Toast([string]$Title, [string]$Body, [bool]$Urgent, [string]$Url) 
       $doc.LoadXml($xml)
       $toast = [Windows.UI.Notifications.ToastNotification]::new($doc)
       $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId)
-      $setting = [string]$notifier.Setting
-      if ($setting -ne 'Enabled') {
+      # Setting ponekod (Windows 10 + PS 5.1) vrne prazno/$null, ceprav toast deluje -> prazno = neznano, poskusi pokazati.
+      # Izklopljeno sele, ce Windows izrecno vrne drugo vrednost kot Enabled.
+      $setting = ''
+      try { if ($null -ne $notifier.Setting) { $setting = [string]$notifier.Setting } } catch { $setting = '' }
+      if ($setting -eq '') { Write-Log ('Toast (' + $appId + '): nastavitev obvestil neznana (prazno) - poskusim vseeno.') }
+      if ($setting -ne '' -and $setting -ne 'Enabled') {
         Write-Log ('Toast (' + $appId + '): nastavitev obvestil = ' + $setting)
         $last = 'izklopljeno:' + $setting
         continue
@@ -276,6 +290,29 @@ function Show-Toast([string]$Title, [string]$Body, [bool]$Urgent, [string]$Url) 
     }
   }
   return $last
+}
+
+# Zapise v dnevnik nastavitve, zaradi katerih toast morda ne prikaze (za diagnozo; nic ne spreminja)
+function Write-ToastDiagnostics {
+  try {
+    $items = @(
+      @('HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications', 'ToastEnabled'),
+      @(('HKCU:\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\' + $script:AppId), 'Enabled'),
+      @('HKCU:\Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications', 'NoToastApplicationNotification'),
+      @('HKCU:\Software\Policies\Microsoft\Windows\Explorer', 'DisableNotificationCenter'),
+      @('HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications', 'NoToastApplicationNotification'),
+      @('HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer', 'DisableNotificationCenter')
+    )
+    foreach ($it in $items) {
+      $val = '(ni nastavljeno)'
+      try {
+        $v = (Get-ItemProperty -LiteralPath $it[0] -Name $it[1] -ErrorAction Stop).($it[1])
+        $val = [string]$v
+      } catch { }
+      Write-Log ('DIAG ' + $it[0] + ' ' + $it[1] + ' = ' + $val)
+    }
+    Write-Log 'DIAG nasvet: Nastavitve > Sistem > Obvestila: vklopi obvestila; izklopi Ne moti / Focus Assist; na seznamu vklopi "Nabava Orodjarna".'
+  } catch { Write-Log ('DIAG napaka: ' + $_) }
 }
 
 function Play-FallbackSound {

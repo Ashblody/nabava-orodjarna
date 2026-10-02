@@ -56,5 +56,10 @@ TEŽAVE - OBVESTILA SE NE POKAŽEJO
  7. Zapis za razvijalca:  %LOCALAPPDATA%\NabavaOrodjarna\notifier.log
     (v Raziskovalec vpiši to besedilo v naslovno vrstico).
  8. Antivirus (WithSecure) javi blokado? Pošlji sliko sporočila Andreju.
+ 9. Namestitev javi "Ne najdem strežnika", pa se stran v brskalniku odpre?
+    Uporabljaš staro različico (1.2.0/1.2.1). Izbriši staro razširjeno mapo,
+    razširi novi ZIP (1.2.2) in znova dvoklikni NAMESTI-OBVESTILA.bat.
+10. NAMESTI-STREZNIK.bat poganjaj SAMO na strežniškem PC (192.168.1.124).
+    Na vseh ostalih PC-jih zaženi samo NAMESTI-OBVESTILA.bat.
 
 Ikona "N" > desni klik:  Odpri  |  Utišaj 1 h  |  Preizkusni toast  |  Izhod

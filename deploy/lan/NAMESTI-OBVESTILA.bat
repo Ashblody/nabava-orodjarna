@@ -17,8 +17,10 @@ echo Namescam obvestila, prosim pocakaj...
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0paket\obvestila\namesti-obvestila.ps1"
 if errorlevel 1 (
   echo.
-  echo Nekaj ni uspelo. Preberi sporocilo na zaslonu.
-  echo Zapis: %LOCALAPPDATA%\NabavaOrodjarna\notifier.log
+  echo Obvestila se niso namestila. Preberi okno, ki se je odprlo.
+  echo Kaj narediti: poskusi se enkrat - dvoklik na NAMESTI-OBVESTILA.bat.
+  echo Ce ne gre, poslji Andreju sliko tega okna in datoteko:
+  echo %LOCALAPPDATA%\NabavaOrodjarna\notifier.log
   pause
   exit /b 1
 )

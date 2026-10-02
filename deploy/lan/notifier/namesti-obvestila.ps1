@@ -1,20 +1,37 @@
-﻿# Nabava Orodjarna - namestitev obvestil na ta PC (brez admina). Zazene jo NAMESTI-OBVESTILA.bat.
+﻿# Nabava Orodjarna - namestitev obvestil (brez admina). Zazene jo NAMESTI-OBVESTILA.bat.
+# Neobvezni parametri (za preizkus brez klikanja): -Ime "Andrej"  -Streznik http://192.168.1.124:8787  -Tiho (brez oken, sporocila gredo v zapis)
+param(
+  [string]$Ime,
+  [string]$Streznik,
+  [switch]$Tiho
+)
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
-. (Join-Path $here 'nabava-obvestila.ps1') -NoRun   # skupne funkcije (Write-Log, Parse-Json, ...)
+try {
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  . (Join-Path $here 'nabava-obvestila.ps1') -NoRun   # skupne funkcije (Write-Log, Parse-Json, ...)
+} catch {
+  # se pred glavnim blokom: pokazi vsaj preprosto sporocilo
+  $m = 'Namestitev ni uspela (datoteke paketa niso v redu).' + [Environment]::NewLine + [Environment]::NewLine +
+    'Kaj narediti: izbriši mapo, kamor si razširil ZIP, ZIP razširi znova (desni klik > Razširi vse) in dvoklikni NAMESTI-OBVESTILA.bat.' +
+    [Environment]::NewLine + [Environment]::NewLine + 'Tehnični opis: ' + $_
+  try { [void][System.Windows.Forms.MessageBox]::Show($m, 'Nabava obvestila', 'OK', 'Error') } catch { Write-Host $m }
+  exit 1
+}
 $ErrorActionPreference = 'Stop'   # (skripta obvestil ga je ob nalaganju spremenila)
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
 
 $Title = 'Nabava obvestila'
 $DefaultServer = 'http://192.168.1.124:8787'
+$nl = [Environment]::NewLine
 $packRoot = Split-Path -Parent (Split-Path -Parent $here)
 $installDir = Join-Path $env:LOCALAPPDATA 'NabavaOrodjarna\notifier'
 $cfgFile = Join-Path $installDir 'config.json'
 $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
 function Show-Msg([string]$text, [string]$kind) {
+  if ($Tiho) { Write-Log ('SPOROCILO (' + $kind + '): ' + ($text -replace '\r?\n', ' / ')); Write-Host ('[' + $kind + '] ' + $text); return }
   $icon = [System.Windows.Forms.MessageBoxIcon]::Information
   if ($kind -eq 'err') { $icon = [System.Windows.Forms.MessageBoxIcon]::Error }
   if ($kind -eq 'warn') { $icon = [System.Windows.Forms.MessageBoxIcon]::Warning }
@@ -43,7 +60,7 @@ function Find-AutoUser($users, [string]$winUser) {
     $first = Normalize-Name $parts[0]
     $last = Normalize-Name $parts[$parts.Count - 1]
     $cands = @((Normalize-Name $u.name), $first)
-    if ($parts.Count -gt 1) { $cands += ($first + $last); $cands += ($last + $first); $cands += ($first.Substring(0, 1) + $last) }
+    if ($parts.Count -gt 1) { $cands += ($first + $last); $cands += ($last + $first); if ($first.Length -gt 0) { $cands += ($first.Substring(0, 1) + $last) } }
     if ($cands -contains $w) { $hits += $u }
   }
   if ($hits.Count -eq 1) { return $hits[0] }
@@ -142,20 +159,32 @@ try {
     $line = (Get-Content -LiteralPath $override -TotalCount 1 -Encoding UTF8)
     if ($line -and $line.Trim() -match '^https?://') { $server = $line.Trim().TrimEnd('/') }
   }
+  if ($Streznik -and $Streznik.Trim() -match '^https?://') { $server = $Streznik.Trim().TrimEnd('/') }
+  Write-Log ('PowerShell ' + $PSVersionTable.PSVersion + ', streznik ' + $server + ', Windows uporabnik ' + $env:USERNAME)
 
   # 2) seznam imen s streznika
   $users = @()
   try { $users = @(Get-ServerUsers $server) } catch {
-    Write-Log ('Streznik ni dosegljiv: ' + $_)
-    Show-Msg ("Ne najdem strežnika:" + [Environment]::NewLine + $server + [Environment]::NewLine + [Environment]::NewLine +
-      "1) Ali PC Oro455 (192.168.1.124) teče?" + [Environment]::NewLine +
-      "2) Ali si v istem omrežju (Wi-Fi / kabel)?" + [Environment]::NewLine +
-      "3) Poskusi v brskalniku: " + $server + [Environment]::NewLine + [Environment]::NewLine +
-      "Ko bo odprlo, poženi NAMESTI-OBVESTILA.bat še enkrat.") 'err'
+    $ex = $_.Exception
+    $isNet = $false
+    for ($e = $ex; $e; $e = $e.InnerException) { if ($e -is [System.Net.WebException] -or $e -is [System.Net.Sockets.SocketException] -or $e -is [System.IO.IOException]) { $isNet = $true } }
+    Write-Log ('Streznik ni dosegljiv ali neveljaven odgovor [' + $ex.GetType().FullName + ']: ' + $ex.Message)
+    if ($isNet) {
+      Show-Msg ("Ne najdem strežnika:" + $nl + $server + $nl + $nl +
+        "1) Ali strežniški PC (192.168.1.124) teče?" + $nl +
+        "2) Ali si v istem omrežju (Wi-Fi / kabel)?" + $nl +
+        "3) Poskusi v brskalniku: " + $server + $nl + $nl +
+        "Ko bo odprlo, poženi NAMESTI-OBVESTILA.bat še enkrat." + $nl + $nl +
+        "Tehnični opis: " + $ex.Message) 'err'
+      exit 2
+    }
+    Show-Msg ("Strežnik odgovarja, a namestitev ne zna prebrati odgovora (napaka v programu, ne v omrežju)." + $nl + $nl +
+      "Kaj narediti: pošlji Andreju ta zapis:" + $nl + $script:LogPath + $nl + $nl +
+      "Tehnični opis: " + $ex.Message) 'err'
     exit 2
   }
   if ($users.Count -eq 0) {
-    Show-Msg ("V aplikaciji še ni nobenega uporabnika." + [Environment]::NewLine +
+    Show-Msg ("V aplikaciji še ni nobenega uporabnika." + $nl +
       "Odpri " + $server + " v brskalniku, se prijavi/registriraj, nato poženi NAMESTI-OBVESTILA.bat še enkrat.") 'warn'
     exit 3
   }
@@ -166,8 +195,17 @@ try {
     try { $existingId = [string]((Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-Json).userId) } catch { }
   }
   $chosen = $null
-  if (-not $existingId) { $chosen = Find-AutoUser $users $env:USERNAME }
-  if ($chosen) { Write-Log ('Samodejno ime: ' + $chosen.name + ' (Windows: ' + $env:USERNAME + ')') }
+  if ($Ime) {
+    $want = Normalize-Name $Ime
+    $m = @($users | Where-Object { (Normalize-Name $_.name) -eq $want -or (Normalize-Name (([string]$_.name).Trim() -split '\s+')[0]) -eq $want })
+    if ($m.Count -ne 1) {
+      Show-Msg ('Ime "' + $Ime + '" ni enolično med uporabniki (' + $m.Count + ' zadetkov). Uporabniki: ' + (($users | ForEach-Object { $_.name }) -join ', ')) 'err'
+      exit 4
+    }
+    $chosen = $m[0]
+  }
+  elseif (-not $existingId) { $chosen = Find-AutoUser $users $env:USERNAME }
+  if ($chosen) { Write-Log ('Ime: ' + $chosen.name + ' (Windows: ' + $env:USERNAME + ', parameter -Ime: ' + $Ime + ')') }
   else { $chosen = Select-User $users $existingId }
   if (-not $chosen) { Write-Log 'Preklicano.'; exit 0 }
 
@@ -199,23 +237,32 @@ try {
   $sc.Save()
 
   # 7) zagon + preizkusni toast
-  $logSize = 0
-  if (Test-Path -LiteralPath $script:LogPath) { $logSize = (Get-Item -LiteralPath $script:LogPath).Length }
+  # beri samo NOVE vrstice zapisa (stari "FIRSTRUN" iz prejsnje namestitve ne sme veljati)
+  $logLines = 0
+  if (Test-Path -LiteralPath $script:LogPath) { $logLines = @(Get-Content -LiteralPath $script:LogPath -Encoding UTF8).Count }
   Start-Process -FilePath $psExe -ArgumentList ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $script2 + '" -FirstRun') -WindowStyle Hidden
   $result = ''
-  for ($i = 0; $i -lt 24; $i++) {
+  for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Path -LiteralPath $script:LogPath) {
-      $txt = Get-Content -LiteralPath $script:LogPath -Encoding UTF8 -Tail 40 | Out-String
+      $all = @(Get-Content -LiteralPath $script:LogPath -Encoding UTF8)
+      $skip = $logLines
+      if ($all.Count -lt $logLines) { $skip = 0 }   # zapis se je medtem zarotiral
+      $txt = ($all | Select-Object -Skip $skip) -join [Environment]::NewLine
       $m = [regex]::Match($txt, 'FIRSTRUN: (.*)')
       if ($m.Success) { $result = $m.Groups[1].Value.Trim() }
       if ($result) { break }
     }
   }
   Write-Log ('Namestitev končana, uporabnik ' + $chosen.name + ', preizkus: ' + $result)
+  if ($result -ne 'ok') { Write-ToastDiagnostics }
 
-  $nl = [Environment]::NewLine
-  if ($result -eq 'ok') {
+  $trayUp = $false
+  try { $trayUp = [bool](Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match 'nabava-obvestila\.ps1' -and $_.ProcessId -ne $PID }) } catch { }
+  Write-Log ('Ikona v opravilni vrstici (proces) tece: ' + $trayUp)
+  if (-not $trayUp) {
+    Show-Msg ("Nameščeno, a program z ikono 'N' se ni zagnal." + $nl + $nl + "Kaj narediti: odjavi se in se znova prijavi v Windows (ali poženi NAMESTI-OBVESTILA.bat še enkrat). Če ne gre, pošlji Andreju zapis:" + $nl + $script:LogPath) 'warn'
+  } elseif ($result -eq 'ok') {
     Show-Msg ("Pripravljeno, " + $chosen.name + "!" + $nl + $nl +
       "Videti bi moral obvestilo v desnem spodnjem kotu in slišati zvok." + $nl +
       "Ikona 'N' je zraven ure (lahko je pod puščico ^)." + $nl + $nl +
@@ -234,6 +281,6 @@ try {
   exit 0
 } catch {
   Write-Log ('NAPAKA namestitve: ' + $_)
-  Show-Msg ("Namestitev ni uspela:" + [Environment]::NewLine + $_ + [Environment]::NewLine + [Environment]::NewLine + "Zapis: " + $script:LogPath) 'err'
+  Show-Msg ("Namestitev ni uspela." + $nl + $nl + "Kaj narediti: poskusi še enkrat (dvoklik na NAMESTI-OBVESTILA.bat). Če spet ne gre, pošlji Andreju ta zapis:" + $nl + $script:LogPath + $nl + $nl + "Tehnični opis: " + $_) 'err'
   exit 1
 }
