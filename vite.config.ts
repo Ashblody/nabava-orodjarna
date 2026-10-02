@@ -10,7 +10,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8'))
 }
 
 const NOTES =
-  '1.3.0: nov zavihek Klepet (Splošno, Plani, Nujno, Razno + zasebni pogovori), sporočila v živo, oznaka stroja, kljukica, iskanje. Podatki klepeta so ločeni od db.json.'
+  '1.4.0: nov zavihek Kaj se mudi (delovni nalog, stranka, datum, narejeno), obvestila (toast) za klepet in nujno prek ikone N (poizvedba na 4 s). Po posodobitvi znova zaženi NAMESTI-OBVESTILA.bat.'
 
 function versionJsonPlugin(): Plugin {
   return {

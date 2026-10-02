@@ -14,7 +14,7 @@ export type Category =
   | 'Kava'
   | 'Drugo'
 
-export type MainTab = 'nabava' | 'servisi' | 'zgodovina' | 'klepet'
+export type MainTab = 'nabava' | 'servisi' | 'zgodovina' | 'klepet' | 'mudi'
 
 export interface WorkstationSlot {
   id: string

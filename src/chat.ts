@@ -56,6 +56,17 @@ let readTimer: number | undefined
 let highlightId = ''
 let audioCtx: AudioContext | null = null
 
+let boardHook: (payload: unknown) => void = () => {}
+let reopenHook: () => void = () => {}
+/** Tabla "Kaj se mudi" uporablja isto SSE povezavo kot klepet (ena povezava na zavihek). */
+export function setStreamHooks(h: { board: (payload: unknown) => void; reopen: () => void }) {
+  boardHook = h.board
+  reopenHook = h.reopen
+}
+export function chatBeep(urgent: boolean) {
+  beep(urgent)
+}
+
 let onBadge: (n: number) => void = () => {}
 let onIncoming: (m: Msg, chName: string) => void = () => {}
 
@@ -183,6 +194,7 @@ function connect() {
     connected = true
     if (hadError) {
       hadError = false
+      reopenHook()
       void loadBootstrap().then(afterChange).catch(() => {})
     }
     paintStatus()
@@ -207,6 +219,7 @@ function connect() {
       }
     }
   })
+  src.addEventListener('board', (e) => boardHook(JSON.parse((e as MessageEvent).data)))
   src.addEventListener('read', (e) => {
     const d = JSON.parse((e as MessageEvent).data) as { channel: string }
     if (d.channel && unread[d.channel]) {

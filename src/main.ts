@@ -12,7 +12,8 @@ import {
   findWorkstation,
 } from './data.ts'
 import { createUser, findUserByName } from './auth.ts'
-import { chatHidden, chatSaveUi, chatSelect, chatUnreadTotal, mountChat, setChatHooks, startChat, stopChat } from './chat.ts'
+import { boardEvent, boardReopen, boardSaveUi, boardSummary, itemTitle, dateLabel, mountBoard, setBoardHooks, startBoard, stopBoard } from './board.ts'
+import { setStreamHooks, chatHidden, chatSaveUi, chatSelect, chatUnreadTotal, mountChat, setChatHooks, startChat, stopChat } from './chat.ts'
 import { downloadExcelCsv, downloadWordDoc, stamp } from './export.ts'
 import { fileToDataUrl } from './image.ts'
 import {
@@ -108,6 +109,7 @@ function stopScan() {
 function logout() {
   stopScan()
   stopChat()
+  stopBoard()
   session = null
   saveSession(null)
   authView = 'pick'
@@ -174,6 +176,7 @@ function suggestSuppliers(category?: string, title?: string): SupplierRecord[] {
 function render() {
   stopScan()
   chatSaveUi()
+  boardSaveUi()
   if (!session) {
     renderAuth()
     return
@@ -182,7 +185,10 @@ function render() {
     logout()
     return
   }
-  if (isServerMode()) startChat({ id: session.userId, name: session.displayName })
+  if (isServerMode()) {
+    startChat({ id: session.userId, name: session.displayName })
+    startBoard({ id: session.userId, name: session.displayName })
+  }
   renderApp()
 }
 
@@ -307,13 +313,18 @@ function shell(content: string) {
     ['servisi', '⚙', 'Servisi', 'Okuma'],
     ['zgodovina', '▤', 'Zgodovina', 'Arhiv'],
   ]
-  if (isServerMode()) tabs.push(['klepet', '✉', 'Klepet', 'Sporočila'])
+  if (isServerMode()) {
+    tabs.push(['mudi', '⚑', 'Kaj se mudi', 'Nujno'])
+    tabs.push(['klepet', '✉', 'Klepet', 'Sporočila'])
+  }
   const tabsHtml = tabs
     .map(([id, icon, label, hintTab]) => {
       const chatN = chatUnreadTotal()
       const countHtml =
         id === 'nabava' && count > 0
           ? `<span class="tab-count ${nujnoClass}">${count}</span>`
+          : id === 'mudi'
+            ? `<span class="tab-count tab-count-nujno" data-mudi-badge hidden></span>`
           : id === 'klepet'
             ? `<span class="tab-count" data-chat-badge${chatN > 0 ? '' : ' hidden'}>${chatN}</span>`
             : ''
@@ -350,10 +361,17 @@ function shell(content: string) {
         <button class="btn btn-ghost" type="button" data-action="logout">Odjava</button>
       </div>
     </header>
-    <nav class="tabs ${tabs.length > 3 ? 'tabs-4' : ''}" aria-label="Glavni meni">${tabsHtml}</nav>
-    ${tab === 'klepet' ? '' : howtoPanel()}
+    <nav class="tabs ${tabs.length > 3 ? 'tabs-5' : ''}" aria-label="Glavni meni">${tabsHtml}</nav>
+    ${isServerMode() ? '<button type="button" class="mudi-strip" data-mudi-strip hidden></button>' : ''}
+    ${tab === 'klepet' || tab === 'mudi' ? '' : howtoPanel()}
     <main>${content}</main>
   `
+  app.querySelector('[data-mudi-strip]')?.addEventListener('click', () => {
+    tab = 'mudi'
+    detailRequestId = null
+    render()
+  })
+  updateMudiUi()
   app.querySelector('[data-action="logout"]')?.addEventListener('click', logout)
   app.querySelector('[data-action="check-update"]')?.addEventListener('click', () => {
     void checkForUpdate(true)
@@ -380,6 +398,27 @@ function shell(content: string) {
       render()
     })
   })
+}
+
+/** pas "Kaj se mudi" nad vsebino + značka na zavihku (brez render()) */
+function updateMudiUi() {
+  const sum = boardSummary()
+  const strip = document.querySelector<HTMLElement>('[data-mudi-strip]')
+  if (strip) {
+    const hide = sum.open === 0 || tab === 'mudi'
+    strip.hidden = hide
+    if (!hide) {
+      const nx = sum.next
+      const dl = nx ? dateLabel(nx.date).text : ''
+      strip.className = `mudi-strip ${sum.overdue > 0 ? 'has-overdue' : sum.today > 0 ? 'has-today' : ''}`
+      strip.textContent = `⚑ Kaj se mudi: ${sum.open}${sum.overdue ? ` · zapadlo ${sum.overdue}` : ''}${nx ? ` — ${dl}: ${itemTitle(nx)}` : ''}`
+    }
+  }
+  const b = document.querySelector<HTMLElement>('[data-mudi-badge]')
+  if (b) {
+    b.hidden = sum.open === 0
+    b.textContent = String(sum.open)
+  }
 }
 
 /* ===================== Auth ===================== */
@@ -1307,10 +1346,17 @@ function renderApp() {
   if (tab === 'nabava') content = renderNabava()
   else if (tab === 'servisi') content = renderServisi()
   else if (tab === 'klepet' && isServerMode()) content = '<div id="chat-slot"></div>'
+  else if (tab === 'mudi' && isServerMode()) content = '<div id="mudi-slot"></div>'
   else content = renderZgodovina()
 
   shell(content)
 
+  const mudiSlot = app.querySelector<HTMLElement>('#mudi-slot')
+  if (mudiSlot) {
+    chatHidden()
+    mountBoard(mudiSlot)
+    return
+  }
   const chatSlot = app.querySelector<HTMLElement>('#chat-slot')
   if (chatSlot) {
     mountChat(chatSlot)
@@ -1411,8 +1457,8 @@ async function applyPolledData(next: typeof data, opts?: { silent?: boolean }) {
   // Browser toast when tab may be hidden / background
   await notifyNewEvents(events, true)
 
-  if (tab === 'klepet') {
-    // klepet ima lasten DOM; ne rušimo ga zaradi novih zahtev v ozadju
+  if (tab === 'klepet' || tab === 'mudi') {
+    // klepet in tabla imata lasten DOM; ne rušimo ga zaradi novih zahtev v ozadju
     updateBadgeDom()
     return
   }
@@ -1463,6 +1509,10 @@ function startPolling() {
 }
 
 function applyHash(): boolean {
+  if (location.hash === '#/mudi' && isServerMode()) {
+    tab = 'mudi'
+    return true
+  }
   const m = /^#\/klepet(?:\/(.+))?$/.exec(location.hash)
   if (!m || !isServerMode()) return false
   tab = 'klepet'
@@ -1488,6 +1538,8 @@ async function bootstrap() {
     },
     incoming: (title, text) => showToast(`${title}: ${text.length > 80 ? text.slice(0, 77) + '…' : text}`),
   })
+  setBoardHooks({ change: updateMudiUi, incoming: (t) => showToast(t.length > 110 ? t.slice(0, 107) + '…' : t) })
+  setStreamHooks({ board: boardEvent, reopen: boardReopen })
   applyHash()
   render()
   window.addEventListener('hashchange', () => {

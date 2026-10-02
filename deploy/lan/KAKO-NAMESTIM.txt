@@ -20,15 +20,17 @@ A) STREŽNIK  -  samo ENKRAT, samo na Oro455 (192.168.1.124)
  Če je PC izklopljen, aplikacija ne dela - ob vklopu in prijavi steče sama.
 
 
-A2) POSODOBITEV STREŽNIKA (nova različica, npr. 1.3.0 s klepetom) - samo na Oro455
+A2) POSODOBITEV STREŽNIKA (nova različica, npr. 1.4.0) - samo na Oro455
 -----------------------------------------------------------------------------
  1. Razširi novi ZIP (desni klik > "Razširi vse").
  2. Dvoklik na  NAMESTI-STREZNIK.bat  (isto kot prvič). Podatki in kopije ostanejo.
- 3. Počakaj "Strežnik TEČE". Na vseh PC-jih osveži stran (F5): zavihek "Klepet".
+ 3. Počakaj "Strežnik TEČE". Na vseh PC-jih osveži stran (F5): zavihka "Kaj se mudi" in "Klepet".
  Za vsak slučaj najprej kopiraj mapo C:\NabavaOrodjarna\data (npr. na namizje).
 
 
 B) VSAK RAČUNALNIK  -  obvestila (3 koraki, brez skrbnika)
+(Ob posodobitvi na 1.4.0 to ponovi na vsakem PC: obvestila za klepet in "Kaj se mudi".
+ Zadostuje majhen ZIP nabava-obvestila-pack-1.4.0.zip.)
 ----------------------------------------------------------
  1. Desni klik na ZIP > "Razširi vse".
  2. Dvoklik na  NAMESTI-OBVESTILA.bat

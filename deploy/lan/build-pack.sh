@@ -1,25 +1,30 @@
 #!/usr/bin/env bash
 # Sestavi nabava-obvestila-pack.zip. Zahteva: bun (build:lan), zip, NODE_ZIP (Windows x64 Node zip; ni v gitu).
+# Samo obvestila (majhen ZIP, brez strežnika in node.exe): NOTIFIER_ONLY=1 deploy/lan/build-pack.sh izhod.zip
 # Uporaba: NODE_ZIP=/workspace/node-win-x64.zip deploy/lan/build-pack.sh [izhod.zip]
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-$REPO/nabava-obvestila-pack.zip}"
-NODE_ZIP="${NODE_ZIP:?nastavi NODE_ZIP na node-v*-win-x64.zip}"
+NOTIFIER_ONLY="${NOTIFIER_ONLY:-}"
+if [ -z "$NOTIFIER_ONLY" ]; then NODE_ZIP="${NODE_ZIP:?nastavi NODE_ZIP na node-v*-win-x64.zip}"; fi
 STAGE="$(mktemp -d)/nabava-obvestila-pack"
-mkdir -p "$STAGE/paket/streznik/node" "$STAGE/paket/obvestila"
-
-(cd "$REPO" && bun run build:lan)
-cp -r "$REPO/dist" "$STAGE/paket/streznik/dist"
-mkdir -p "$STAGE/paket/streznik/server"
-cp "$REPO"/server/*.js "$STAGE/paket/streznik/server/"
-cp "$REPO/package.json" "$STAGE/paket/streznik/package.json"
-cp "$REPO"/deploy/lan/streznik/*.ps1 "$STAGE/paket/streznik/"
+mkdir -p "$STAGE/paket/obvestila"
 cp "$REPO"/deploy/lan/notifier/*.ps1 "$STAGE/paket/obvestila/"
-cp "$REPO"/deploy/lan/*.bat "$REPO/deploy/lan/KAKO-NAMESTIM.txt" "$STAGE/"
-
-T="$(mktemp -d)"
-unzip -q "$NODE_ZIP" '*/node.exe' -d "$T"
-cp "$T"/*/node.exe "$STAGE/paket/streznik/node/node.exe"
+if [ -n "$NOTIFIER_ONLY" ]; then
+  cp "$REPO"/deploy/lan/NAMESTI-OBVESTILA.bat "$REPO"/deploy/lan/ODSTRANI-OBVESTILA.bat "$REPO/deploy/lan/KAKO-NAMESTIM.txt" "$STAGE/"
+else
+  mkdir -p "$STAGE/paket/streznik/node"
+  (cd "$REPO" && bun run build:lan)
+  cp -r "$REPO/dist" "$STAGE/paket/streznik/dist"
+  mkdir -p "$STAGE/paket/streznik/server"
+  cp "$REPO"/server/*.js "$STAGE/paket/streznik/server/"
+  cp "$REPO/package.json" "$STAGE/paket/streznik/package.json"
+  cp "$REPO"/deploy/lan/streznik/*.ps1 "$STAGE/paket/streznik/"
+  cp "$REPO"/deploy/lan/*.bat "$REPO/deploy/lan/KAKO-NAMESTIM.txt" "$STAGE/"
+  T="$(mktemp -d)"
+  unzip -q "$NODE_ZIP" '*/node.exe' -d "$T"
+  cp "$T"/*/node.exe "$STAGE/paket/streznik/node/node.exe"
+fi
 
 V="$(node -p "require('$REPO/package.json').version")"
 printf 'Nabava Orodjarna %s\r\nPaket zgrajen: %s\r\n' "$V" "$(date '+%Y-%m-%d %H:%M')" > "$STAGE/VERZIJA.txt"
